@@ -48,7 +48,6 @@ supabase/functions/ Edge Functions (added in later phases: payments, etc.)
 
 ## Migration status
 Schedule and phase definitions: `../Wager_Supabase_Migration_Workflow.docx`.
-Daily progress: `EOD_LOG.md`.
 
 - [x] **Phase 0 — Foundation** (Day 1): unified app, admin at `/admin`, core schema
   (profiles/bills/vip/notifications/chat) + RLS + balance guard, Supabase Auth
