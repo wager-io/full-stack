@@ -26,11 +26,15 @@ it to any static host.
    - Casino: http://localhost:5173
    - Admin:  http://localhost:5173/admin  (requires a profile with `is_admin = true`)
 
-### Make yourself an admin (local)
-After signing up once, in Studio SQL editor:
-```sql
-update public.profiles set is_admin = true, admin_role = 'super_admin' where email = 'you@example.com';
+### Make yourself an admin
+Sign up through the app first (this creates the profile), then:
+```bash
+npm run promote-admin -- you@example.com          # defaults to super_admin
+npm run promote-admin -- mod@example.com moderator
 ```
+Requires `SUPABASE_SERVICE_ROLE_KEY` in `.env`. There is deliberately no
+promote-to-admin endpoint reachable from the browser — `promote_to_admin()` is
+granted to `service_role` only, so holding the service key *is* the authorisation.
 
 ## Layout
 ```
@@ -42,14 +46,21 @@ supabase/seed.sql   VIP tiers
 supabase/functions/ Edge Functions (added in later phases: payments, etc.)
 ```
 
-## Migration status (phased — see ../ plan file)
-- [x] **Phase 1 — Foundation:** unified app, admin at `/admin`, core schema
+## Migration status
+Schedule and phase definitions: `../Wager_Supabase_Migration_Workflow.docx`.
+Daily progress: `EOD_LOG.md`.
+
+- [x] **Phase 0 — Foundation** (Day 1): unified app, admin at `/admin`, core schema
   (profiles/bills/vip/notifications/chat) + RLS + balance guard, Supabase Auth
-  wired into AuthContext, live balance via profiles subscription. **Builds.**
-- [ ] Phase 2 — wallet/profile reads + instant games (dice/limbo/plinko)
-- [ ] Phase 3 — stateful games (mines/hilo)
-- [ ] Phase 4 — crash (deterministic scheduled rounds + pg_cron)
-- [ ] Phase 5 — CCPayment Edge Functions + admin data wiring + affiliate/sports
+  wired into AuthContext, live balance via profiles subscription. Function grants
+  locked down, admin bootstrap. **Builds.**
+- [ ] Phase 1 — Identity & money (Day 2): wallet ledger RPCs, global bet feed
+- [ ] Phase 2 — Instant games (Days 3–4): dice, limbo, plinko
+- [ ] Phase 3 — Stateful games (Days 5–6): mines, hilo
+- [ ] Phase 4 — Crash (Days 7–8): deterministic scheduled rounds + pg_cron
+- [ ] Phase 5 — Payments, comms, admin (Day 9): CCPayment Edge Functions, chat,
+      admin data wiring
+- [ ] Phase 6 — Hardening & cutover (Day 10)
 
 ## Notes
 - All money mutations go through SECURITY DEFINER RPCs / service-role Edge
