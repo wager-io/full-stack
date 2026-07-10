@@ -1,0 +1,75 @@
+.card-fly-out {
+  animation: cardFlyOut 0.35s forwards;
+}
+
+.card-fly-out-left {
+  animation: cardFlyOutLeft 0.35s forwards;
+}
+.card-fly-out-right {
+  animation: cardFlyOutRight 0.35s forwards;
+}
+
+@keyframes cardFlyOut {
+  0% {
+    transform: translateY(0) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-120px) scale(0.7) rotate(-20deg);
+    opacity: 0;
+  }
+}
+@keyframes cardFlyOutLeft {
+  0% {
+    transform: translateY(0) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-80px, -120px) scale(0.7) rotate(-20deg);
+    opacity: 0;
+  }
+}
+@keyframes cardFlyOutRight {
+  0% {
+    transform: translateY(0) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(80px, -120px) scale(0.7) rotate(20deg);
+    opacity: 0;
+  }
+}
+
+.card-slide-in-right {
+  animation: cardSlideInRight 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+@keyframes cardSlideInRight {
+  from {
+    transform: translateX(120px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes cardSlideInRight {
+  from {
+    transform: translateX(120px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}

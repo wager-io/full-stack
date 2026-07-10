@@ -1,0 +1,19 @@
+/* Admin theme, scoped under .admin-root so it never leaks into the casino UI.
+   Tailwind itself is imported once globally by src/index.css — do NOT import it
+   again here. Only the admin's CSS variables + base look live here. */
+.admin-root {
+  --primary-bg: #1a1a2e;
+  --secondary-bg: #21213e;
+  --accent-purple: #6a0dad;
+  --text-light: #e0e0e0;
+  --text-dark: #a0a0a0;
+  --success-green: #00e676;
+  --border-color: #3a3a5a;
+  --chart-line: #8884d8;
+  --chart-fill: #6a0dad50;
+
+  min-height: 100vh;
+  background: var(--primary-bg);
+  color: var(--text-light);
+  font-family: 'Poppins', Arial, Helvetica, sans-serif, 'Nunito';
+}

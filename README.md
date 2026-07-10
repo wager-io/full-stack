@@ -1,0 +1,74 @@
+# Wager Frontend
+
+This is the frontend application for the Wager casino platform, built with React, Vite, and TailwindCSS.
+
+## Project Structure
+
+- `src/components`: Reusable UI components (Layout, Games, Modals)
+- `src/context`: React Context definitions (AuthContext, SocketContext)
+- `src/pages`: Main application page views
+- `src/services`: API service layers (Auth, Socket, Game logic)
+- `src/utils`: Helper functions and constants
+
+## Prerequisites
+
+- Node.js (v16 or higher)
+- npm or yarn
+
+## Installation
+
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+## Configuration
+
+Create a `.env` file in the root directory with the following variables:
+
+```env
+VITE_API_URL=http://localhost:8000
+VITE_SOCKET_URL=http://localhost:8000
+```
+
+- `VITE_API_URL`: The URL of your backend API.
+- `VITE_SOCKET_URL`: The URL of your backend Socket.IO server.
+
+## Running the Application
+
+### Development
+To start the development server with Hot Module Replacement (HMR):
+
+```bash
+npm run dev
+```
+
+The application will be available at `http://localhost:5173`.
+
+### Production Build
+To build the application for production:
+
+```bash
+npm run build
+```
+
+This will generate a `dist` directory containing the compiled assets.
+
+### Preview Production Build
+To locally preview the production build:
+
+```bash
+npm run preview
+```
+
+## Key Features
+
+- **Real-time Gaming**: Integrated with Socket.IO for live game updates (Plinko, Hilo, Crash, etc.).
+- **Authentication**: JWT-based authentication with session persistence.
+- **Responsive Design**: Mobile-first UI using TailwindCSS.
+- **State Management**: React Context for global state (User, Wallet, Game State).
+
+## Deployment
+
+This application is ready for deployment on platforms like Netlify, Vercel, or Heroku. Ensure environment variables are correctly set in your deployment dashboard.

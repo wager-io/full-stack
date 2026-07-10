@@ -1,0 +1,1136 @@
+.lmWKWf.game-style0 {
+  max-width: 1368px;
+  margin: 0px auto;
+  padding: 1.25rem 0.625rem;
+}
+
+.lmWKWf {
+  min-height: 90vh;
+}
+
+.lmWKWf.game-style0 .game-area {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.ikZPEu .game-main.game-main {
+  min-height: auto;
+}
+
+.lmWKWf.game-style0 .game-main:not(.mobile-view) {
+  padding-left: 330px;
+}
+
+.lmWKWf.game-style0 .game-main {
+  min-height: 47.5rem;
+}
+
+.lmWKWf.game-style0 .game-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+
+.lmWKWf .game-main {
+  position: relative;
+  border-radius: 1.25rem;
+  background-color: rgb(23, 24, 27);
+}
+
+.lmWKWf.game-style0 .game-view,
+.lmWKWf.game-style1 .game-view,
+.lmWKWf.game-style-iframe .game-view {
+  flex: 1 1 0%;
+  display: flex;
+  flex-direction: column;
+}
+
+.lmWKWf .game-tabs {
+  margin-top: 2.5rem;
+}
+
+.lmWKWf .game-tabs .tabs-navs {
+  margin-bottom: 0.75rem;
+  margin-left: 0.625rem;
+  display: inline-flex;
+}
+
+.kQfmQV .tabs-navs {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  height: 2.25rem;
+  position: relative;
+  border-radius: 1.125rem;
+  background-color: rgba(49, 52, 60, 0.7);
+}
+
+.lmWKWf .game-tabs .tabs-navs .tabs-nav {
+  width: 5.625rem;
+}
+
+.kQfmQV .tabs-nav:hover {
+  color: rgb(245, 246, 247);
+}
+
+.kQfmQV .tabs-nav {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+  flex: 1 1 0%;
+  height: 100%;
+  cursor: pointer;
+  white-space: nowrap;
+  width: 100%;
+  z-index: 1;
+}
+
+.kQfmQV .tabs-nav.is-active {
+  color: rgb(245, 246, 247);
+  font-weight: bold;
+}
+
+.kQfmQV .tabs-navs .bg {
+  border-radius: 1.125rem;
+  background-image: linear-gradient(
+    to left,
+    rgb(85, 89, 102),
+    rgb(85, 89, 102),
+    rgb(88, 174, 20)
+  );
+  opacity: 0.4;
+  height: 100%;
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  transition:
+    right 0.2s ease-out 0s,
+    left 0.3s ease-out 0s;
+  transform: translateZ(0px);
+  box-shadow: rgba(0, 0, 0, 0.14) 0px 0px 0.3125rem;
+}
+
+.lmWKWf .game-tabs .tabs-view {
+  background-color: rgb(30, 32, 36);
+  border-radius: 1.25rem;
+  padding: 1px 0px;
+}
+
+.kQfmQV .tabs-view {
+  position: relative;
+}
+
+.hsmSjD {
+  width: 100%;
+  border-radius: 1.25rem;
+  background-color: rgb(30, 32, 36);
+  padding: 1.5rem 1.5rem 2rem;
+  margin-top: 2rem;
+}
+
+.hsmSjD .intro-title {
+  min-height: 5rem;
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+}
+
+.hsmSjD .intro-title > p {
+  font-size: 1rem;
+  color: rgb(245, 246, 247);
+  font-weight: 600;
+  margin: 0px;
+  white-space: nowrap;
+}
+
+.hsmSjD .intro-title .intro-tags {
+  margin-left: 2.5rem;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.hsmSjD .intro-title .intro-tags > p {
+  margin: 0px 1.125rem 0.3125rem 0px;
+  padding: 0.5rem 1.25rem;
+  border-radius: 1.125rem;
+  background-color: rgb(43, 47, 54);
+}
+
+.hsmSjD .description {
+  margin-top: 0.75rem;
+  line-height: 1.25rem;
+}
+
+.hsmSjD .intro-detail {
+  width: 6.75rem;
+  height: 2.5rem;
+  margin-top: 2rem;
+  border-radius: 1.25rem;
+  background-color: rgba(49, 52, 60, 0.6);
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+}
+
+.hsmSjD .intro-detail > svg {
+  font-size: 0.5625rem;
+  margin-left: 1.125rem;
+}
+
+@media screen and (max-width: 621px) {
+  .hsmSjD {
+    margin: 1.25rem 0px 0px !important;
+    width: auto !important;
+    padding: 1rem 0.75rem 1.5rem !important;
+  }
+  .hsmSjD .intro-title {
+    flex-wrap: wrap !important;
+    height: auto !important;
+  }
+  .hsmSjD .intro-title .intro-tags > p {
+    margin: 0px 0.3125rem 0.3125rem 0px !important;
+    white-space: nowrap !important;
+    padding: 0.375rem 0.875rem !important;
+    line-height: 1.25rem !important;
+    height: 2rem !important;
+  }
+  .hsmSjD .description {
+    margin-top: 0.625rem !important;
+    line-height: 1.25rem !important;
+    padding-left: 0.25rem !important;
+  }
+  .hsmSjD .intro-title > p {
+    width: 100% !important;
+    margin: 0px 0px 1rem !important;
+    line-height: 1.25rem !important;
+    padding: 0px 0.625rem !important;
+  }
+  .hsmSjD .intro-title .intro-tags {
+    margin-left: 0px !important;
+    flex-wrap: wrap !important;
+  }
+}
+
+p {
+  margin: 0.8em 0;
+}
+
+/* MyBets component styles */
+.iycaRo {
+  min-height: 30rem;
+  padding: 0.5rem;
+}
+
+.iUeetX {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0px;
+}
+
+.iycaRo tr {
+  cursor: pointer;
+}
+
+.iUeetX th:first-child,
+.iUeetX td:first-child {
+  text-align: left;
+}
+
+.iUeetX th,
+.iUeetX td {
+  overflow: hidden;
+  text-align: center;
+  padding: 0.875rem 0.75rem;
+}
+
+.iUeetX th {
+  font-weight: normal;
+  color: rgba(153, 164, 176, 0.6);
+}
+
+.iUeetX th:last-child,
+.iUeetX td:last-child {
+  text-align: right;
+}
+
+.iUeetX td:first-child {
+  border-radius: 0.625rem 0px 0px 0.625rem;
+}
+
+.iUeetX td {
+  border: 1px solid transparent;
+  color: rgb(153, 164, 176);
+}
+
+.iUeetX.is-hover tbody tr:hover td {
+  background: rgb(45, 48, 53);
+}
+
+.iycaRo a {
+  color: inherit;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iycaRo .coin {
+  font-weight: bold;
+}
+
+.table .sc-Galmp {
+  font-family: Monmono;
+}
+
+.erPQzq {
+  display: inline-flex;
+  vertical-align: middle;
+  -webkit-box-align: center;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.erPQzq .coin-icon {
+  width: 1.4em;
+  height: 1.4em;
+  margin-right: 0.25em;
+}
+
+.iycaRo .coin .amount {
+  color: rgb(245, 246, 247);
+}
+
+.erPQzq .amount-str {
+  width: 7em;
+  display: inline-block;
+}
+
+.erPQzq .suffix {
+  opacity: 0.5;
+}
+
+.iUeetX td:last-child {
+  border-radius: 0px 0.625rem 0.625rem 0px;
+}
+
+.iycaRo .is-win .amount {
+  color: rgb(67, 179, 9);
+}
+
+.iycaRo .is-lose .amount {
+  color: rgb(237, 99, 0);
+}
+
+/* GameView component styles */
+.fIoiVG .empty-item {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  color: var(--text-6);
+  background-color: rgba(122, 128, 140, 0.15);
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+.fIoiVG .empty-item > p {
+  margin: 0px;
+  padding: 0px 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.game-view {
+  flex: 1 1 0%;
+  display: flex;
+  flex-direction: column;
+}
+
+.fIoiVG .recent-list-wrap {
+  flex: 1 1 auto;
+  height: 100%;
+  margin: 0px 1.5rem;
+  overflow: hidden;
+  position: relative;
+}
+
+.fIoiVG .recent-list {
+  position: absolute;
+  top: 0px;
+  right: 0px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  -webkit-box-pack: end;
+  justify-content: flex-end;
+}
+
+.fIoiVG .recent-item {
+  padding: 0px 0.25rem;
+  cursor: pointer;
+}
+
+.fIoiVG .is-win {
+  color: rgb(245, 246, 247);
+  background-color: rgb(67, 179, 9);
+}
+
+.fIoiVG .is-lose {
+  color: rgba(153, 164, 176, 0.6);
+  background-color: rgba(122, 128, 140, 0.15);
+}
+
+.fIoiVG .item-wrap {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+  flex: 1 1 0%;
+  height: 100%;
+  border-radius: 1.375rem;
+  font-weight: bold;
+}
+
+.game-box {
+  flex: 1 1 0%;
+  background-color: rgb(23, 24, 27);
+  background-size: auto 100%;
+  background-position: center center;
+}
+
+.dqwCNK {
+  position: relative;
+}
+
+.kIRDZR {
+  text-align: center;
+  padding-top: 1.875rem;
+}
+
+.gnjHQb {
+  position: absolute;
+  z-index: 2;
+  right: 1.5rem;
+  bottom: 1.25rem;
+  font-weight: 500;
+  min-width: 8.75rem;
+  padding: 0px 1.125rem;
+  border-radius: 1.125rem;
+  height: 2.25rem;
+  line-height: 2.25rem;
+  color: rgba(153, 164, 176, 0.6);
+  background-color: rgba(49, 52, 60, 0.4);
+}
+
+.dqwCNK .box-bg {
+  position: absolute;
+  left: 0px;
+  right: 0px;
+  bottom: -1px;
+  width: 100%;
+}
+
+/* Empty state styles */
+.etYRmD {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 30rem;
+}
+
+.biQums.empty {
+  display: flex;
+  flex-direction: column;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+}
+
+.biQums.empty img {
+  width: 12.5rem;
+  height: 12.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.biQums.empty .msg {
+  color: rgba(153, 164, 176, 0.6);
+  font-size: 1rem;
+}
+
+/* Additional utility classes */
+.notranslate {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.monospace {
+  font-family: 'Monmono', monospace;
+}
+
+.has-sign {
+  position: relative;
+}
+
+.lmWKWf.game-style0 {
+  max-width: 1368px;
+  margin: 0px auto;
+  padding: 1.25rem 0.625rem;
+}
+
+.lmWKWf {
+  min-height: 90vh;
+}
+
+.lmWKWf.game-style0 .game-area {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.ikZPEu .game-main.game-main {
+  min-height: auto;
+}
+
+.lmWKWf.game-style0 .game-main:not(.mobile-view) {
+  padding-left: 330px;
+}
+
+.lmWKWf.game-style0 .game-main {
+  min-height: 47.5rem;
+}
+
+.lmWKWf.game-style0 .game-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+
+.lmWKWf .game-main {
+  position: relative;
+  border-radius: 1.25rem;
+  background-color: rgb(23, 24, 27);
+}
+
+.lmWKWf.game-style0 .game-view,
+.lmWKWf.game-style1 .game-view,
+.lmWKWf.game-style-iframe .game-view {
+  flex: 1 1 0%;
+  display: flex;
+  flex-direction: column;
+}
+
+.lmWKWf .game-tabs {
+  margin-top: 2.5rem;
+}
+
+.lmWKWf .game-tabs .tabs-navs {
+  margin-bottom: 0.75rem;
+  margin-left: 0.625rem;
+  display: inline-flex;
+}
+
+.kQfmQV .tabs-navs {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  height: 2.25rem;
+  position: relative;
+  border-radius: 1.125rem;
+  background-color: rgba(49, 52, 60, 0.7);
+}
+
+.lmWKWf .game-tabs .tabs-navs .tabs-nav {
+  width: 5.625rem;
+}
+
+.kQfmQV .tabs-nav:hover {
+  color: rgb(245, 246, 247);
+}
+
+.kQfmQV .tabs-nav {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+  flex: 1 1 0%;
+  height: 100%;
+  cursor: pointer;
+  white-space: nowrap;
+  width: 100%;
+  z-index: 1;
+}
+
+.kQfmQV .tabs-nav.is-active {
+  color: rgb(245, 246, 247);
+  font-weight: bold;
+}
+
+.kQfmQV .tabs-navs .bg {
+  border-radius: 1.125rem;
+  background-image: linear-gradient(
+    to left,
+    rgb(85, 89, 102),
+    rgb(85, 89, 102),
+    rgb(88, 174, 20)
+  );
+  opacity: 0.4;
+  height: 100%;
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  transition:
+    right 0.2s ease-out 0s,
+    left 0.3s ease-out 0s;
+  transform: translateZ(0px);
+  box-shadow: rgba(0, 0, 0, 0.14) 0px 0px 0.3125rem;
+}
+
+.lmWKWf .game-tabs .tabs-view {
+  background-color: rgb(30, 32, 36);
+  border-radius: 1.25rem;
+  padding: 1px 0px;
+}
+
+.kQfmQV .tabs-view {
+  position: relative;
+}
+
+.hsmSjD {
+  width: 100%;
+  border-radius: 1.25rem;
+  background-color: rgb(30, 32, 36);
+  padding: 1.5rem 1.5rem 2rem;
+  margin-top: 2rem;
+}
+
+.hsmSjD .intro-title {
+  min-height: 5rem;
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+}
+
+.hsmSjD .intro-title > p {
+  font-size: 1rem;
+  color: rgb(245, 246, 247);
+  font-weight: 600;
+  margin: 0px;
+  white-space: nowrap;
+}
+
+.hsmSjD .intro-title .intro-tags {
+  margin-left: 2.5rem;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.hsmSjD .intro-title .intro-tags > p {
+  margin: 0px 1.125rem 0.3125rem 0px;
+  padding: 0.5rem 1.25rem;
+  border-radius: 1.125rem;
+  background-color: rgb(43, 47, 54);
+}
+
+.hsmSjD .description {
+  margin-top: 0.75rem;
+  line-height: 1.25rem;
+}
+
+.hsmSjD .intro-detail {
+  width: 6.75rem;
+  height: 2.5rem;
+  margin-top: 2rem;
+  border-radius: 1.25rem;
+  background-color: rgba(49, 52, 60, 0.6);
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+}
+
+.hsmSjD .intro-detail > svg {
+  font-size: 0.5625rem;
+  margin-left: 1.125rem;
+}
+/* Add these styles to the existing plinko.css file */
+
+/* GameControls component styles */
+.game-control {
+  position: relative;
+  padding: 1.25rem;
+  background-color: rgb(30, 32, 36);
+  border-radius: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+.game-control.style0 {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  bottom: 0px;
+  width: 330px;
+  margin-top: 0px;
+}
+
+.game-control.mobile-view {
+  margin-top: 1.25rem;
+}
+
+.game-control-switch {
+  display: flex;
+  height: 2.25rem;
+  position: relative;
+  border-radius: 1.125rem;
+  background-color: rgba(49, 52, 60, 0.7);
+  margin-bottom: 1.25rem;
+}
+
+.game-control-switch button {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+  flex: 1 1 0%;
+  height: 100%;
+  cursor: pointer;
+  white-space: nowrap;
+  width: 100%;
+  z-index: 1;
+}
+
+.game-control-switch button.is-active {
+  color: rgb(245, 246, 247);
+  font-weight: bold;
+}
+
+.game-control-switch.disabled button {
+  cursor: not-allowed;
+}
+
+.game-control-panel {
+  position: relative;
+}
+
+/* BetAmountInput component styles */
+.game-coininput {
+  position: relative;
+  margin-bottom: 1.25rem;
+}
+
+.game-coininput.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.input-label {
+  display: flex;
+  -webkit-box-pack: justify;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.label {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  color: rgba(153, 164, 176, 0.6);
+}
+
+.max-profit {
+  margin-left: 0.5rem;
+  position: relative;
+}
+
+.max-profit .icon {
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.max-profit .tip {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.625rem;
+  background-color: rgb(43, 47, 54);
+  white-space: nowrap;
+  display: none;
+}
+
+.max-profit:hover .tip {
+  display: block;
+}
+
+.label-amount {
+  color: rgba(153, 164, 176, 0.6);
+}
+
+.input-control {
+  position: relative;
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  height: 3.75rem;
+  border-radius: 0.625rem;
+  background-color: rgb(43, 47, 54);
+  padding: 0px 0.75rem;
+}
+
+.input-control input {
+  flex: 1 1 0%;
+  height: 100%;
+  background-color: transparent;
+  border: none;
+  color: rgb(245, 246, 247);
+  font-weight: bold;
+  font-size: 1.125rem;
+  padding: 0px;
+  text-align: left;
+}
+
+.coin-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0px 0.75rem;
+}
+
+.button-group {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+}
+
+.button-group button {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.625rem;
+  background-color: rgb(49, 52, 60);
+  margin-left: 0.5rem;
+  color: rgb(245, 246, 247);
+  font-weight: bold;
+}
+
+.button-group button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.slider-toggle {
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+  flex-direction: column;
+}
+
+.slider-toggle .icon {
+  font-size: 0.5rem;
+}
+
+.slider-toggle .icon:first-child {
+  transform: rotate(180deg);
+}
+
+.fix-layer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  height: 100%;
+  padding: 0px 0.75rem;
+  background-color: rgb(43, 47, 54);
+  border-radius: 0.625rem;
+  z-index: 10;
+}
+
+.fix-layer button {
+  width: auto;
+  height: 2rem;
+  padding: 0px 0.75rem;
+  border-radius: 0.625rem;
+  background-color: rgb(49, 52, 60);
+  margin: 0px 0.5rem;
+  color: rgb(153, 164, 176);
+  font-weight: normal;
+}
+
+.fix-layer button.active {
+  color: rgb(245, 246, 247);
+  background-color: rgb(67, 179, 9);
+}
+
+.slider {
+  position: relative;
+  width: 10rem;
+  height: 0.25rem;
+  background-color: rgb(49, 52, 60);
+  border-radius: 0.125rem;
+  margin: 0px 0.5rem;
+}
+
+.slider-after, .slider-before {
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  border-radius: 0.125rem;
+}
+
+.slider-after {
+  background-color: rgb(67, 179, 9);
+}
+
+.slider-before {
+  background-color: rgb(49, 52, 60);
+}
+
+.slider-handler-wrap {
+  position: absolute;
+  top: 50%;
+  left: 0px;
+  transform: translate(0%, -50%);
+}
+
+.slider-handler {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background-color: rgb(245, 246, 247);
+  border: 2px solid rgb(67, 179, 9);
+  cursor: grab;
+  margin: 0;
+  padding: 0;
+}
+
+/* RiskSelector and RowSelector component styles */
+.selection-view {
+  margin-bottom: 1.25rem;
+}
+
+.selection-title {
+  color: rgba(153, 164, 176, 0.6);
+  margin-bottom: 0.5rem;
+}
+
+.selection-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.selection-option {
+  height: 2.5rem;
+  padding: 0px 1rem;
+  border-radius: 0.625rem;
+  background-color: rgb(43, 47, 54);
+  color: rgb(153, 164, 176);
+  cursor: pointer;
+}
+
+.selection-option.active {
+  color: rgb(245, 246, 247);
+  background-color: rgb(67, 179, 9);
+}
+
+.selection-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* BetButton component styles */
+.bet-button {
+  width: 100%;
+  height: 3.75rem;
+  border-radius: 0.625rem;
+  background-color: rgb(67, 179, 9);
+  color: rgb(245, 246, 247);
+  font-weight: bold;
+  font-size: 1.125rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.bet-button:hover {
+  background-color: rgb(77, 189, 19);
+}
+
+.bet-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bet-button.inactive {
+  background-color: rgb(49, 52, 60);
+  cursor: not-allowed;
+}
+
+/* AutoBetPanel component styles */
+.bet-control-auto {
+  display: flex;
+  flex-direction: column;
+}
+
+.auto-bet-settings {
+  margin-bottom: 1.25rem;
+}
+
+.auto-bet-input {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.75rem;
+}
+
+.auto-bet-input label {
+  color: rgba(153, 164, 176, 0.6);
+  margin-bottom: 0.5rem;
+}
+
+.auto-bet-input input {
+  height: 3rem;
+  border-radius: 0.625rem;
+  background-color: rgb(43, 47, 54);
+  border: none;
+  color: rgb(245, 246, 247);
+  padding: 0px 0.75rem;
+  font-size: 1rem;
+}
+
+.auto-bet-button {
+  width: 100%;
+  height: 3.75rem;
+  border-radius: 0.625rem;
+  background-color: rgb(67, 179, 9);
+  color: rgb(245, 246, 247);
+  font-weight: bold;
+  font-size: 1.125rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.auto-bet-button:hover {
+  background-color: rgb(77, 189, 19);
+}
+
+.auto-bet-button.active {
+  background-color: rgb(237, 99, 0);
+}
+
+.auto-bet-button.active:hover {
+  background-color: rgb(247, 109, 10);
+}
+
+.auto-bet-button.inactive {
+  background-color: rgb(49, 52, 60);
+  cursor: not-allowed;
+}
+
+/* GameActions component styles */
+.game-actions {
+  display: flex;
+  order: 10;
+  -webkit-box-align: center;
+  align-items: center;
+  height: 4rem;
+  position: relative;
+}
+
+.game-actions::before {
+  content: '';
+  flex: 1 1 0%;
+}
+
+.action-item:hover {
+  background: rgba(49, 52, 60, 0.35);
+}
+
+.action-item:hover .icon {
+  font-size: 1rem;
+  fill: rgb(245, 246, 247);
+}
+
+.action-item {
+  cursor: pointer;
+  margin-right: 0.5rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+}
+
+.icon {
+  fill: rgb(153, 164, 176);
+  transition: all 0.3s ease-in-out 0s;
+}
+
+.game-actions::after {
+  content: '';
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  right: 0px;
+  height: 1px;
+  opacity: 0.3;
+  background-color: rgb(49, 52, 60);
+}
+
+.action-item.active .icon {
+  fill: rgb(67, 179, 9);
+}
+
+/* Common styles */
+.coin {
+  display: inline-flex;
+  vertical-align: middle;
+  -webkit-box-align: center;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.coin .amount {
+  color: rgb(245, 246, 247);
+}
+
+.coin .suffix {
+  opacity: 0.5;
+}
+
+.notranslate {
+  font-family: Monmono;
+}
+
+.monospace {
+  font-family: Monmono;
+}
+
+.hidden {
+  display: none;
+}
