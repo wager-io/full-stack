@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "promote-admin": "node scripts/promote-admin.mjs"
+    "promote-admin": "node scripts/promote-admin.mjs",
+    "security-check": "node scripts/security-check.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
