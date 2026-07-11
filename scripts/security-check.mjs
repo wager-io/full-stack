@@ -138,6 +138,103 @@ console.log('\n  --- attacks over the real REST API, as a logged-in player ---')
   tap('service-side promote_to_admin works (/admin reachable)', !error && data.is_admin === true)
 }
 
+// =========================================================================
+// 0004 — wallet ledger (place_bet / settle_bet) and the bet feed
+// =========================================================================
+console.log('\n  --- wallet ledger + bet feed (0004) ---')
+
+// Fund the attacker so they can actually bet.
+await admin.rpc('adjust_balance', { p_user: attackerId, p_delta: 100 })
+
+// Happy path: place a bet, balance debits, ledger + vip wager recorded.
+let placedBetId = null
+{
+  const { data, error } = await browser.rpc('place_bet', { p_game: 'dice', p_amount: 10 })
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  const { data: vp } = await admin.from('vip_progress').select('current_wager').eq('user_id', attackerId).single()
+  placedBetId = data?.bet_id
+  tap('place_bet debits the balance (100 -> 90)', !error && Number(p.balance) === 90)
+  tap('place_bet records a pending bet', data?.state === 'pending' && !!data?.bet_id)
+  tap('place_bet counts toward VIP wager', Number(vp.current_wager) === 10)
+}
+// Ledger entry written.
+{
+  const { data } = await admin.from('bills').select('transaction_type,trx_amount').eq('bill_id', placedBetId)
+  tap('place_bet writes a bills ledger entry', data?.length === 1 && Number(data[0].trx_amount) === -10)
+}
+
+// ATTACK: bet more than you hold.
+{
+  const { error } = await browser.rpc('place_bet', { p_game: 'dice', p_amount: 999999 })
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  tap('ATTACK betting beyond balance is DENIED', !!error)
+  tap('  ...and balance is unchanged (still 90)', Number(p.balance) === 90)
+}
+// ATTACK: negative stake to credit yourself.
+{
+  const { error } = await browser.rpc('place_bet', { p_game: 'dice', p_amount: -500 })
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  tap('ATTACK negative stake is DENIED', !!error && Number(p.balance) === 90)
+}
+// ATTACK: settle your own bet at a multiplier of your choosing.
+{
+  const { error } = await browser.rpc('settle_bet', { p_bet_id: placedBetId, p_multiplier: 1000 })
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  tap('ATTACK calling settle_bet directly is DENIED', !!error)
+  tap('  ...and no payout was credited (still 90)', Number(p.balance) === 90)
+}
+// ATTACK: edit the bet row (multiplier/payout) straight through PostgREST.
+{
+  await browser.from('bets').update({ multiplier: 500, payout: 5000, state: 'won' }).eq('bet_id', placedBetId)
+  const { data } = await admin.from('bets').select('multiplier,payout,state').eq('bet_id', placedBetId).single()
+  tap('ATTACK writing to bets table is BLOCKED', Number(data.payout) === 0 && data.state === 'pending')
+}
+// ATTACK: insert a fabricated winning bet.
+{
+  const { error } = await browser.from('bets').insert({
+    user_id: attackerId, game: 'dice', bet_amount: 1, multiplier: 999, payout: 999, state: 'won',
+  })
+  tap('ATTACK inserting a fake winning bet is DENIED', !!error)
+}
+
+// Settlement works from the server side, exactly once.
+{
+  await admin.rpc('settle_bet', { p_bet_id: placedBetId, p_multiplier: 2 })
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  const { data: b } = await admin.from('bets').select('state,payout,profit').eq('bet_id', placedBetId).single()
+  tap('service-side settle_bet credits the win (90 + 20 = 110)', Number(p.balance) === 110)
+  tap('bet marked won with correct profit', b.state === 'won' && Number(b.profit) === 10)
+}
+{
+  const { error } = await admin.rpc('settle_bet', { p_bet_id: placedBetId, p_multiplier: 2 })
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  tap('double-settle is REJECTED (no double payout)', !!error && Number(p.balance) === 110)
+}
+
+// Feed visibility.
+{
+  const anonC = createClient(SB_URL, env.VITE_SUPABASE_ANON_KEY, { auth: { persistSession: false } })
+  const { data } = await anonC.from('recent_bets').select('bet_id,display_name').eq('bet_id', placedBetId)
+  tap('settled bet appears in the public feed', (data || []).length === 1)
+}
+{
+  // A pending bet must not leak — an open Mines/Hilo game would expose state.
+  await admin.rpc('adjust_balance', { p_user: victimId, p_delta: 50 })
+  const vBrowser = createClient(SB_URL, env.VITE_SUPABASE_ANON_KEY, { auth: { persistSession: false } })
+  await vBrowser.auth.signInWithPassword({ email: mk('victim'), password: PW })
+  const { data: vb } = await vBrowser.rpc('place_bet', { p_game: 'mines', p_amount: 5 })
+  const { data: seen } = await browser.from('bets').select('bet_id').eq('bet_id', vb.bet_id)
+  tap('another player\'s PENDING bet is not readable', (seen || []).length === 0)
+}
+// Ledger integrity: bills must sum to the balance.
+{
+  const { data: bills } = await admin.from('bills').select('trx_amount').eq('user_id', attackerId)
+  const sum = bills.reduce((a, r) => a + Number(r.trx_amount), 0)
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  // 100 was credited by adjust_balance directly (no bill), so compare deltas.
+  tap('ledger reconciles with balance (100 + bills = balance)', 100 + sum === Number(p.balance))
+}
+
 // cleanup
 for (const id of [victimId, attackerId]) await admin.auth.admin.deleteUser(id)
 
