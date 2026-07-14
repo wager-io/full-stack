@@ -316,6 +316,41 @@ await admin.rpc('adjust_balance', { p_user: attackerId, p_delta: 1000 })
   tap('ledger reconciles after real gameplay', DIRECT_TOPUPS + sum === Number(p.balance))
 }
 
+// =========================================================================
+// 0006 — Plinko
+// =========================================================================
+console.log('\n  --- plinko (0006) ---')
+{
+  const { data, error } = await browser.rpc('plinko_drop', { p_amount: 10, p_risk: 2, p_rows: 12 })
+  const r = Array.isArray(data) ? data[0] : data
+  tap('plinko_drop returns a resolved drop', !error && r && typeof r.bucket === 'number')
+  tap('plinko path length equals rows (12)', r && Array.isArray(r.path) && r.path.length === 12)
+  tap('plinko bucket = sum of path steps', r && r.bucket === r.path.reduce((a, b) => a + b, 0))
+  tap('plinko path is only 0/1 steps', r && r.path.every((s) => s === 0 || s === 1))
+  const { data: b } = await admin.from('bets').select('state,game').eq('bet_id', r.bet_id).single()
+  tap('plinko bet is settled', b && b.state !== 'pending' && b.game === 'plinko')
+}
+// ATTACK: invalid risk / rows.
+{
+  const { error: e1 } = await browser.rpc('plinko_drop', { p_amount: 10, p_risk: 9, p_rows: 12 })
+  const { error: e2 } = await browser.rpc('plinko_drop', { p_amount: 10, p_risk: 2, p_rows: 99 })
+  tap('ATTACK invalid plinko risk/rows are REJECTED', !!e1 && !!e2)
+}
+// ATTACK: tamper with the payout table (raise a bucket's multiplier).
+{
+  const { error } = await browser.from('plinko_payouts').update({ payouts: [999] }).eq('risk', 2).eq('rows', 12)
+  const { data } = await admin.from('plinko_payouts').select('payouts').eq('risk', 2).eq('rows', 12).single()
+  tap('ATTACK editing plinko payout table is BLOCKED', data.payouts[0] !== 999)
+}
+// Multiplier must match the published payout table for the resulting bucket.
+{
+  const { data } = await browser.rpc('plinko_drop', { p_amount: 5, p_risk: 3, p_rows: 16 })
+  const r = Array.isArray(data) ? data[0] : data
+  const { data: tbl } = await admin.from('plinko_payouts').select('payouts').eq('risk', 3).eq('rows', 16).single()
+  tap('plinko multiplier matches the payout table for its bucket',
+      Number(r.multiplier) === Number(tbl.payouts[r.bucket]))
+}
+
 // cleanup
 for (const id of [victimId, attackerId]) await admin.auth.admin.deleteUser(id)
 

@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { io } from 'socket.io-client';
 import { AuthContext } from '../../context/AuthContext';
-import { serverUrl } from '../../utils/api';
+import { rpc } from '../../lib/realtime';
 import PlinkoCanvas from './PlinkoCanvas';
 
 const PlinkoContext = createContext();
@@ -10,8 +9,7 @@ export const usePlinkoGame = () => useContext(PlinkoContext);
 
 export const PlinkoGameProvider = ({ children }) => {
   const { user, balance, setBalance } = useContext(AuthContext);
-  const [socket, setSocket] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [connected] = useState(true);          // no socket; always ready
   const [recentBets, setRecentBets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -27,50 +25,21 @@ export const PlinkoGameProvider = ({ children }) => {
   const [risk, setRisk] = useState(1); // 1: low, 2: medium, 3: high
   const [rows, setRows] = useState(8);
 
-  // Initialize socket connection
+  // Load this user's recent plinko bets on mount / login.
   useEffect(() => {
-    const socketInstance = io(serverUrl());
-
-    socketInstance.on('connect', () => {
-      setConnected(true);
-      // Initialize game data
-      socketInstance.emit('plinko-init', user, (response) => {
-        if (response.code === 0) {
-          setRecentBets(response.data.betLogs || []);
-        } else {
-          setError(response.message);
-        }
-        setLoading(false);
-      });
-    });
-
-    socketInstance.on('disconnect', () => {
-      setConnected(false);
-    });
-
-    socketInstance.on('plinkoBet', (bet) => {
-      if (!user) return;
-
-      if (bet.userId === user._id) {
-        setPendingBets(prev => [...prev, bet]); // <-- This line is correct!
-        setGameState('dropping');
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      if (user) {
+        const res = await rpc('my_recent_bets', { p_game: 'plinko', p_limit: 10 });
+        if (!cancelled && res.code === 0) setRecentBets(res.data || []);
       } else {
-        setRecentBets(prevBets => [bet, ...prevBets.slice(0, 9)]);
+        setRecentBets([]);
       }
-    });
-
-    socketInstance.on('plinko-wallet', ([walletData]) => {
-      if (user && walletData._id === user._id) {
-        setBalance(walletData.balance);
-      }
-    });
-
-    setSocket(socketInstance);
-
-    return () => {
-      socketInstance.disconnect();
-    };
-  }, [user, setBalance]);
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Add the pending bet to recent bets after animation completes
   const onAnimationComplete = useCallback((betId) => {
@@ -83,72 +52,62 @@ export const PlinkoGameProvider = ({ children }) => {
     }, 2000);
   }, []);
 
-  // Place a bet (drop ball)
-  const placeBet = useCallback(() => {
-    if (!socket || !connected) return; // <-- Only block if not connected
+  // Place a bet (drop ball). The RPC resolves the outcome server-side; we push
+  // the resulting path into pendingBets so the canvas animates the drop, exactly
+  // as the old `plinkoBet` socket event did.
+  const placeBet = useCallback(async () => {
     if (!user) {
       setError('Please log in to place a bet');
       return;
     }
 
-    // No setGameState('betting') here, let animation/gameState be managed by plinkoBet event
+    const res = await rpc('plinko_drop', {
+      p_amount: betAmount,
+      p_risk: risk,
+      p_rows: rows,
+    });
 
-    const betData = {
-      _id: user._id,
-      name: user.username,
-      hidden: user.hidden_from_public || false,
-      avatar: user.profile_image || '',
-      betAmount: betAmount,
-      currencyName: 'USD',
-      currencyImage: '/assets/token/usdt.png',
-      betValue: {
+    if (res.code === 0) {
+      const r = Array.isArray(res.data) ? res.data[0] : res.data;
+      const bet = {
+        betId: r.bet_id,
+        userId: user._id,
+        path: r.path,                 // array of 0/1 (left/right) per row
+        bucket: r.bucket,
+        multiplier: Number(r.multiplier),
+        payout: Number(r.payout),
+        betAmount,
         risk,
         rows,
+      };
+      setLastDrop(bet);
+      setPendingBets(prev => [...prev, bet]);
+      setGameState('dropping');
+      if (typeof balance === 'number') {
+        setBalance(balance - betAmount + Number(r.payout));
       }
-    };
+    } else {
+      setError(res.message);
+      setGameState('idle');
+    }
+  }, [user, betAmount, risk, rows, balance, setBalance]);
 
-    socket.emit('plinko-bet', betData, (response) => {
-      if (response.code !== 0) {
-        setError(response.message);
-        setGameState('idle');
-      }
-      // No setGameState here; handled by plinkoBet event
-    });
-  }, [socket, connected, user, betAmount, risk, rows]);
-
-  // Update seeds (optional, for provably fair)
+  // Rotate seeds (reveals the retiring server seed for verification).
   const updateSeeds = useCallback(async (clientSeed) => {
-    if (!socket || !connected || !user) {
-      throw new Error('Not connected or not authenticated');
-    }
-    return new Promise((resolve, reject) => {
-      socket.emit('plinko-update-seeds', { userId: user._id, clientSeed }, (response) => {
-        if (response.code === 0) {
-          resolve(response.data);
-        } else {
-          setError(response.message);
-          reject(new Error(response.message));
-        }
-      });
-    });
-  }, [socket, connected, user]);
+    if (!user) throw new Error('Not authenticated');
+    const res = await rpc('rotate_seed', { p_game: 'plinko', p_new_client_seed: clientSeed || null });
+    if (res.code === 0) return Array.isArray(res.data) ? res.data[0] : res.data;
+    setError(res.message);
+    throw new Error(res.message);
+  }, [user]);
 
-  // Get game details (optional)
-  const getGameDetails = useCallback((betId) => {
-    if (!socket || !connected) {
-      throw new Error('Not connected');
-    }
-    return new Promise((resolve, reject) => {
-      socket.emit('plinko-game-details', { betId }, (response) => {
-        if (response.code === 0) {
-          resolve(response.data);
-        } else {
-          setError(response.message);
-          reject(new Error(response.message));
-        }
-      });
-    }, [socket, connected]);
-  });
+  // Fairness details for the current seed pair.
+  const getGameDetails = useCallback(async () => {
+    const res = await rpc('game_seed_info', { p_game: 'plinko' });
+    if (res.code === 0) return Array.isArray(res.data) ? res.data[0] : res.data;
+    setError(res.message);
+    throw new Error(res.message);
+  }, []);
 
   // Calculate potential profit (example, adjust as needed)
   const calculateProfit = () => {
