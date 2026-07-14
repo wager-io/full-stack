@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { io } from 'socket.io-client';
 import { AuthContext } from '../../context/AuthContext';
-import { serverUrl } from '../../utils/api';
+import { rpc } from '../../lib/realtime';
 
 // Create context
 const LimboContext = createContext();
@@ -12,8 +11,7 @@ export const useLimboGame = () => useContext(LimboContext);
 // Provider component
 export const LimboGameProvider = ({ children }) => {
   const { user, balance, setBalance } = useContext(AuthContext);
-  const [socket, setSocket] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [connected] = useState(true);          // no socket; always ready
   const [recentBets, setRecentBets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -67,49 +65,20 @@ export const LimboGameProvider = ({ children }) => {
     }
   }, [updateMultiplierFromWinChance]);
 
-  // Initialize socket connection
+  // Load this user's recent limbo bets on mount / login.
   useEffect(() => {
-    const socketInstance = io(serverUrl());
-
-    socketInstance.on('connect', () => {
-      console.log('Connected to limbo socket server');
-      setConnected(true);
-
-      // Initialize game data
-      socketInstance.emit('limbo-init', user, (response) => {
-        if (response.code === 0) {
-          setRecentBets(!user ? [] : response.data.betLogs.filter(bet => bet.user_id === user._id));
-        } else {
-          setError(response.message);
-        }
-        setLoading(false);
-      });
-    });
-
-    socketInstance.on('disconnect', () => {
-      console.log('Disconnected from limbo socket server');
-      setConnected(false);
-    });
-
-    socketInstance.on('limboBet', (bet) => {
-      if (!user) return;
-      if (bet.userId !== user._id) return;
-      // Instead of immediately adding to recentBets, we'll store it and add after animation
-      setPendingBet(bet);
-    });
-
-    socketInstance.on('limbo-wallet', ([walletData]) => {
-      if (user && walletData._id === user._id) {
-        setBalance(walletData.balance);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      if (user) {
+        const res = await rpc('my_recent_bets', { p_game: 'limbo', p_limit: 10 });
+        if (!cancelled && res.code === 0) setRecentBets(res.data || []);
+      } else {
+        setRecentBets([]);
       }
-    });
-
-    setSocket(socketInstance);
-
-    // Cleanup on unmount
-    return () => {
-      socketInstance.disconnect();
-    };
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, [user]);
 
   // Function to add the pending bet to recent bets after animation completes
@@ -120,11 +89,10 @@ export const LimboGameProvider = ({ children }) => {
     }
   }, [pendingBet]);
 
-  // Place a bet
-  const placeBet = useCallback(() => {
-    if (!socket || !connected || gameState === 'rolling') {
-      return;
-    }
+  // Place a bet. The player's chosen `multiplier` is the target the generated
+  // roll must clear (mode 'over'), matching the old socket contract's betValue.
+  const placeBet = useCallback(async () => {
+    if (gameState === 'rolling') return;
     if (!user) {
       setError('Please log in to place a bet');
       return;
@@ -132,75 +100,57 @@ export const LimboGameProvider = ({ children }) => {
 
     setGameState('rolling');
 
-    const betData = {
-      _id: user._id,
-      name: user.username,
-      hidden: user.hidden_from_public || false,
-      avatar: user.profile_image || '',
-      betAmount: betAmount,
-      currencyName: 'USD', // Replace with your currency
-      currencyImage: '/assets/token/usdt.png', // Replace with your currency image
-      betValue: {
-        target: multiplier,
-        mode: mode
-      }
-    };
-
-    socket.emit('limbo-bet', betData, (response) => {
-      console.log('[LimboContext] Place bet response:', response);
-      if (response.code === 0) {
-        console.log('[LimboContext] Setting lastRoll:', response.data);
-        setLastRoll(response.data);
-        setShowResult(true);
-      } else {
-        console.error('[LimboContext] Bet error:', response.message);
-        setError(response.message);
-      }
-      setGameState('finished');
-
-      // Reset after a short delay
-      setTimeout(() => {
-        setGameState('idle');
-        setShowResult(false);
-      }, 4000);
+    const res = await rpc('limbo_roll', {
+      p_amount: betAmount,
+      p_target: parseFloat(multiplier),
+      p_mode: mode,
     });
-  }, [socket, connected, gameState, user, betAmount, multiplier, mode]);
 
-  // Update seeds
+    if (res.code === 0) {
+      const r = Array.isArray(res.data) ? res.data[0] : res.data;
+      const result = {
+        bet_id: r.bet_id,
+        roll: Number(r.roll),
+        won: r.won,
+        target: parseFloat(multiplier),
+        mode,
+        multiplier: Number(r.multiplier),
+        payout: Number(r.payout),
+        betAmount,
+      };
+      setLastRoll(result);
+      setShowResult(true);
+      setPendingBet({ ...result, user_id: user._id, username: user.username });
+      if (typeof balance === 'number') {
+        setBalance(balance - betAmount + Number(r.payout));
+      }
+    } else {
+      setError(res.message);
+    }
+
+    setGameState('finished');
+    setTimeout(() => {
+      setGameState('idle');
+      setShowResult(false);
+    }, 4000);
+  }, [gameState, user, betAmount, multiplier, mode, balance, setBalance]);
+
+  // Rotate seeds (reveals the retiring server seed for verification).
   const updateSeeds = useCallback(async (clientSeed) => {
-    if (!socket || !connected || !user) {
-      throw new Error('Not connected or not authenticated');
-    }
+    if (!user) throw new Error('Not authenticated');
+    const res = await rpc('rotate_seed', { p_game: 'limbo', p_new_client_seed: clientSeed || null });
+    if (res.code === 0) return Array.isArray(res.data) ? res.data[0] : res.data;
+    setError(res.message);
+    throw new Error(res.message);
+  }, [user]);
 
-    return new Promise((resolve, reject) => {
-      socket.emit('limbo-update-seeds', { userId: user._id, clientSeed }, (response) => {
-        if (response.code === 0) {
-          resolve(response.data);
-        } else {
-          setError(response.message);
-          reject(new Error(response.message));
-        }
-      });
-    });
-  }, [socket, connected, user]);
-
-  // Get game details
-  const getGameDetails = useCallback((betId) => {
-    if (!socket || !connected) {
-      throw new Error('Not connected');
-    }
-
-    return new Promise((resolve, reject) => {
-      socket.emit('limbo-game-details', { betId }, (response) => {
-        if (response.code === 0) {
-          resolve(response.data);
-        } else {
-          setError(response.message);
-          reject(new Error(response.message));
-        }
-      });
-    });
-  }, [socket, connected]);
+  // Fairness details for the current seed pair.
+  const getGameDetails = useCallback(async () => {
+    const res = await rpc('game_seed_info', { p_game: 'limbo' });
+    if (res.code === 0) return Array.isArray(res.data) ? res.data[0] : res.data;
+    setError(res.message);
+    throw new Error(res.message);
+  }, []);
 
   // Handle target change
   const handleTargetChange = (newTarget) => {

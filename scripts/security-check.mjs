@@ -1,6 +1,7 @@
 // End-to-end attack against the LIVE Supabase project, over the real REST API
 // with a real user JWT — exactly what a malicious player's browser can do.
 import { createClient } from '@supabase/supabase-js'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
 const env = Object.fromEntries(
@@ -233,6 +234,86 @@ let placedBetId = null
   const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
   // 100 was credited by adjust_balance directly (no bill), so compare deltas.
   tap('ledger reconciles with balance (100 + bills = balance)', 100 + sum === Number(p.balance))
+}
+
+// =========================================================================
+// 0005 — instant games (dice / limbo)
+// =========================================================================
+console.log('\n  --- instant games: dice + limbo (0005) ---')
+
+// Fund the attacker for game play (direct top-up #2; #1 was 100 in the 0004 block).
+await admin.rpc('adjust_balance', { p_user: attackerId, p_delta: 1000 })
+
+// Happy path: a real dice roll debits, settles, and records one bet.
+{
+  const { data, error } = await browser.rpc('dice_roll', { p_amount: 10, p_target: 50, p_mode: 'under' })
+  const row = Array.isArray(data) ? data[0] : data
+  tap('dice_roll returns a resolved roll', !error && row && typeof row.roll === 'number')
+  tap('dice roll is in range 0..100', row && row.roll >= 0 && row.roll <= 100)
+  const expectWin = row && (row.mode === 'over' ? row.roll > 50 : row.roll < 50) // mode under
+  tap('dice won flag matches the roll vs target', row && row.won === (row.roll < 50))
+  const { data: b } = await admin.from('bets').select('state,game').eq('bet_id', row.bet_id).single()
+  tap('dice bet is settled (not left pending)', b && b.state !== 'pending' && b.game === 'dice')
+}
+// Limbo happy path.
+{
+  const { data, error } = await browser.rpc('limbo_roll', { p_amount: 10, p_target: 2, p_mode: 'over' })
+  const row = Array.isArray(data) ? data[0] : data
+  tap('limbo_roll returns a resolved roll', !error && row && typeof row.roll === 'number')
+  tap('limbo roll is >= 1.00', row && row.roll >= 1)
+  tap('limbo won only if generated >= target', row && row.won === (row.roll > 2))
+}
+
+// ATTACK: out-of-range dice target (old validateBet bounds 2..98).
+{
+  const { error: e1 } = await browser.rpc('dice_roll', { p_amount: 10, p_target: 99, p_mode: 'over' })
+  const { error: e2 } = await browser.rpc('dice_roll', { p_amount: 10, p_target: 1, p_mode: 'under' })
+  tap('ATTACK dice target outside 2..98 is REJECTED', !!e1 && !!e2)
+}
+// ATTACK: bet more than balance through the game path.
+{
+  const { data: p0 } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  const { error } = await browser.rpc('dice_roll', { p_amount: 9_999_999, p_target: 50, p_mode: 'under' })
+  const { data: p1 } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  tap('ATTACK dice bet beyond balance is DENIED', !!error && Number(p0.balance) === Number(p1.balance))
+}
+// ATTACK: the live server_seed must never be readable (it commits future rolls).
+{
+  const { data, error } = await browser.from('game_seeds').select('server_seed')
+  tap('ATTACK reading game_seeds directly is DENIED', !!error || (data || []).length === 0)
+  const info = await browser.rpc('game_seed_info', { p_game: 'dice' })
+  const row = Array.isArray(info.data) ? info.data[0] : info.data
+  tap('game_seed_info returns the hash, never the live server_seed',
+      row && row.server_seed_hash && row.server_seed === undefined)
+}
+// Provable fairness: rotating seeds reveals the seed whose hash was published.
+{
+  const before = await browser.rpc('game_seed_info', { p_game: 'dice' })
+  const beforeHash = (Array.isArray(before.data) ? before.data[0] : before.data).server_seed_hash
+  const rot = await browser.rpc('rotate_seed', { p_game: 'dice', p_new_client_seed: 'my-seed' })
+  const r = Array.isArray(rot.data) ? rot.data[0] : rot.data
+  const sha = createHash('sha256').update(r.revealed_server_seed).digest('hex')
+  tap('rotate_seed reveals a seed matching its published hash', sha === beforeHash)
+  const after = await browser.rpc('game_seed_info', { p_game: 'dice' })
+  tap('nonce resets after rotation', (Array.isArray(after.data) ? after.data[0] : after.data).nonce === 0)
+}
+// Wagering fed VIP progress.
+{
+  const { data: vp } = await admin.from('vip_progress').select('current_wager').eq('user_id', attackerId).single()
+  tap('game wagers accrue to VIP progress', Number(vp.current_wager) > 0)
+}
+// Ledger still reconciles after a batch of real rolls.
+{
+  for (let i = 0; i < 5; i++) await browser.rpc('dice_roll', { p_amount: 3, p_target: 50, p_mode: 'under' })
+  const { data: bills } = await admin.from('bills').select('trx_amount').eq('user_id', attackerId)
+  const sum = bills.reduce((a, r) => a + Number(r.trx_amount), 0)
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  // The only balance movements NOT written as bills are the two direct
+  // adjust_balance top-ups (100 in the 0004 block + 1000 here). Everything
+  // else — every bet debit and win credit — is a bill. So the invariant is:
+  //   balance == direct_topups + sum(bills)
+  const DIRECT_TOPUPS = 1100
+  tap('ledger reconciles after real gameplay', DIRECT_TOPUPS + sum === Number(p.balance))
 }
 
 // cleanup

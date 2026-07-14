@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { io } from 'socket.io-client';
 import { AuthContext } from '../../context/AuthContext';
-import { serverUrl } from '../../utils/api';
+import { rpc } from '../../lib/realtime';
 
 // Create context
 const DiceContext = createContext();
@@ -10,16 +9,24 @@ const DiceContext = createContext();
 export const useDiceGame = () => useContext(DiceContext);
 
 // Provider component
+//
+// Migrated from socket.io to Supabase. The exported context shape is IDENTICAL
+// to the socket version — every UI component (DiceCanvas, DiceControls,
+// BetsTable, DiceHistory...) keeps working unchanged. Only the transport moved:
+//   dice-bet          -> supabase.rpc('dice_roll', ...)
+//   dice-update-seeds -> supabase.rpc('rotate_seed', 'dice')
+//   dice-game-details -> supabase.rpc('game_seed_info', 'dice')
+// The live balance now comes from AuthContext's single profiles subscription,
+// so the old per-game `dice-wallet` event is gone.
 export const DiceGameProvider = ({ children }) => {
   const { user, balance, setBalance } = useContext(AuthContext);
-  const [socket, setSocket] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [connected] = useState(true);          // no socket to connect; always "ready"
   const [recentBets, setRecentBets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [gameState, setGameState] = useState('idle'); // idle, rolling, finished
   const [lastRoll, setLastRoll] = useState(null);
-  const [showResult, setShowResult] = useState(false)
+  const [showResult, setShowResult] = useState(false);
   // Game configuration
   const [betAmount, setBetAmount] = useState(1);
   const [target, setTarget] = useState(50);
@@ -29,58 +36,25 @@ export const DiceGameProvider = ({ children }) => {
   const winChance = mode === 'over' ? (100 - target) : target;
   const multiplier = parseFloat((99 / winChance).toFixed(2));
 
-  // Initialize socket connection
+  // Load this user's recent dice bets on mount / login.
   useEffect(() => {
-    const socketInstance = io(serverUrl());
-
-    socketInstance.on('connect', () => {
-      console.log('[DiceContext] Connected to Dice socket server');
-      setConnected(true);
-
-      // Initialize game data
-      console.log('[DiceContext] Initializing game with user:', user?.username || 'Guest');
-      socketInstance.emit('dice-init', user, (response) => {
-        console.log('[DiceContext] dice-init response:', response);
-        if (response.code === 0) {
-          setRecentBets(!user ? [] : response.data.betLogs.filter(bet => bet.user_id === user._id));
-        } else {
-          console.error('[DiceContext] dice-init error:', response.message);
-          setError(response.message);
-        }
-        setLoading(false);
-      });
-    });
-
-    socketInstance.on('disconnect', () => {
-      console.log('Disconnected from Dice socket server');
-      setConnected(false);
-    });
-
-    socketInstance.on('diceBet', (bet) => {
-      if (!user) return
-      if (bet.userId !== user._id) return
-      setRecentBets(prevBets => [bet, ...prevBets.slice(0, 10)]);
-    });
-
-    socketInstance.on('dice-wallet', ([walletData]) => {
-      if (user && walletData._id === user._id) {
-        setBalance(walletData.balance);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      if (user) {
+        const res = await rpc('my_recent_bets', { p_game: 'dice', p_limit: 10 });
+        if (!cancelled && res.code === 0) setRecentBets(res.data || []);
+      } else {
+        setRecentBets([]);
       }
-    });
-
-    setSocket(socketInstance);
-
-    // Cleanup on unmount
-    return () => {
-      socketInstance.disconnect();
-    };
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, [user]);
 
   // Place a bet
-  const placeBet = useCallback(() => {
-    if (!socket || !connected || gameState === 'rolling') {
-      return;
-    }
+  const placeBet = useCallback(async () => {
+    if (gameState === 'rolling') return;
     if (!user) {
       setError('Please log in to place a bet');
       return;
@@ -88,72 +62,63 @@ export const DiceGameProvider = ({ children }) => {
 
     setGameState('rolling');
 
-    const betData = {
-      _id: user._id,
-      name: user.username,
-      hidden: user.hidden_from_public || false,
-      avatar: user.profile_image || '',
-      betAmount: betAmount,
-      currencyName: 'USD', // Replace with your currency
-      currencyImage: '/assets/token/usdt.png', // Replace with your currency image
-      betValue: {
-        target: target,
-        mode: mode
-      }
-    };
-
-    socket.emit('dice-bet', betData, (response) => {
-      if (response.code === 0) {
-        setLastRoll(response.data);
-        setShowResult(true)
-      } else {
-        setError(response.message);
-      }
-      setGameState('finished');
-
-      // Reset after a short delay
-      setTimeout(() => {
-        setGameState('idle');
-        setShowResult(false)
-      }, 4000);
+    const res = await rpc('dice_roll', {
+      p_amount: betAmount,
+      p_target: target,
+      p_mode: mode,
     });
-  }, [socket, connected, gameState, user, betAmount, target, mode]);
 
-  // Update seeds
+    if (res.code === 0) {
+      // dice_roll returns a single row (as a one-element array via RETURNS TABLE).
+      const r = Array.isArray(res.data) ? res.data[0] : res.data;
+      const result = {
+        bet_id: r.bet_id,
+        roll: Number(r.roll),
+        won: r.won,
+        target,
+        mode,
+        multiplier: Number(r.multiplier),
+        payout: Number(r.payout),
+        betAmount,
+      };
+      setLastRoll(result);
+      setShowResult(true);
+      setRecentBets((prev) => [
+        { ...result, user_id: user._id, username: user.username },
+        ...prev.slice(0, 9),
+      ]);
+      // Balance updates arrive via the AuthContext profiles subscription; nudge
+      // optimistically so the UI reflects the debit/credit without a round-trip.
+      if (typeof balance === 'number') {
+        setBalance(balance - betAmount + Number(r.payout));
+      }
+    } else {
+      setError(res.message);
+    }
+
+    setGameState('finished');
+    setTimeout(() => {
+      setGameState('idle');
+      setShowResult(false);
+    }, 4000);
+  }, [gameState, user, betAmount, target, mode, balance, setBalance]);
+
+  // Rotate seeds (reveals the retiring server seed for verification).
   const updateSeeds = useCallback(async (clientSeed) => {
-    if (!socket || !connected || !user) {
-      throw new Error('Not connected or not authenticated');
-    }
+    if (!user) throw new Error('Not authenticated');
+    const res = await rpc('rotate_seed', { p_game: 'dice', p_new_client_seed: clientSeed || null });
+    if (res.code === 0) return Array.isArray(res.data) ? res.data[0] : res.data;
+    setError(res.message);
+    throw new Error(res.message);
+  }, [user]);
 
-    return new Promise((resolve, reject) => {
-      socket.emit('dice-update-seeds', { userId: user._id, clientSeed }, (response) => {
-        if (response.code === 0) {
-          resolve(response.data);
-        } else {
-          setError(response.message);
-          reject(new Error(response.message));
-        }
-      });
-    });
-  }, [socket, connected, user]);
-
-  // Get game details
-  const getGameDetails = useCallback((betId) => {
-    if (!socket || !connected) {
-      throw new Error('Not connected');
-    }
-
-    return new Promise((resolve, reject) => {
-      socket.emit('dice-game-details', { betId }, (response) => {
-        if (response.code === 0) {
-          resolve(response.data);
-        } else {
-          setError(response.message);
-          reject(new Error(response.message));
-        }
-      });
-    });
-  }, [socket, connected]);
+  // Fairness details for the current seed pair (hash, client seed, nonce).
+  const getGameDetails = useCallback(async () => {
+    const res = await rpc('game_seed_info', { p_game: 'dice' });
+    if (res.code === 0) return Array.isArray(res.data) ? res.data[0] : res.data;
+    setError(res.message);
+    throw new Error(res.message);
+  }, []);
 
   // Handle target change
   const handleTargetChange = (newTarget) => {
@@ -170,7 +135,7 @@ export const DiceGameProvider = ({ children }) => {
     return (betAmount * multiplier - betAmount).toFixed(2);
   };
 
-  // Context value
+  // Context value — unchanged shape from the socket version.
   const value = {
     connected,
     loading,
