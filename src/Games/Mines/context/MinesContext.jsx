@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react'
 import { AuthContext } from '../../../context/AuthContext'
-import useSocketConnection from '../hooks/useSocketConnection'
+import useSocketConnection from '../hooks/useMinesBackend'
 
 const MinesContext = createContext()
 

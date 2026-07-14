@@ -351,6 +351,87 @@ console.log('\n  --- plinko (0006) ---')
       Number(r.multiplier) === Number(tbl.payouts[r.bucket]))
 }
 
+// =========================================================================
+// 0007 — Mines (stateful)
+// =========================================================================
+console.log('\n  --- mines: stateful game (0007) ---')
+
+// Start a game.
+let mineGameId = null
+{
+  const { data, error } = await browser.rpc('mines_start', { p_amount: 10, p_mines: 5 })
+  mineGameId = data?.game_id
+  tap('mines_start opens a game', !error && !!mineGameId && data.state === 'active')
+  tap('CRUX: active game does NOT expose mine_positions', data && data.mine_positions === null)
+  const { data: p } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  tap('mines_start debited the stake', typeof p.balance === 'number')
+}
+// CRUX: the mines_games table itself must be unreadable.
+{
+  const { data, error } = await browser.from('mines_games').select('mine_positions')
+  tap('CRUX: mines_games table is not client-readable', !!error || (data || []).length === 0)
+}
+// Only one active game at a time.
+{
+  const { error } = await browser.rpc('mines_start', { p_amount: 10, p_mines: 5 })
+  tap('ATTACK starting a 2nd concurrent game is DENIED', !!error)
+}
+// Refresh/restore mid-game.
+{
+  const { data } = await browser.rpc('mines_active_game')
+  tap('mines_active_game restores the in-progress round (survives refresh)',
+      data && data.game_id === mineGameId && data.state === 'active')
+  tap('  ...restored state still hides mine_positions', data && data.mine_positions === null)
+}
+// Reveal a safe tile by finding one server-side (admin knows the grid; the
+// browser does not — that asymmetry is the whole point).
+{
+  const { data: g } = await admin.from('mines_games').select('mine_positions').eq('game_id', mineGameId).single()
+  const safe = [...Array(25).keys()].find((i) => !g.mine_positions.includes(i))
+  const { data, error } = await browser.rpc('mines_reveal', { p_game_id: mineGameId, p_position: safe })
+  tap('mines_reveal on a safe tile succeeds', !error && data.hit_mine === false)
+  tap('multiplier rises after a gem', Number(data.current_multiplier) > 1)
+  tap('  ...still no mine_positions while active', data.mine_positions === null)
+}
+// ATTACK: reveal a tile in someone else's game.
+{
+  await admin.rpc('adjust_balance', { p_user: victimId, p_delta: 50 })
+  const vBrowser = createClient(SB_URL, env.VITE_SUPABASE_ANON_KEY, { auth: { persistSession: false } })
+  await vBrowser.auth.signInWithPassword({ email: mk('victim'), password: PW })
+  const { error } = await vBrowser.rpc('mines_reveal', { p_game_id: mineGameId, p_position: 0 })
+  tap('ATTACK revealing another user\'s game is DENIED', !!error)
+}
+// Cash out.
+{
+  const { data: pBefore } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  const { data, error } = await browser.rpc('mines_cashout', { p_game_id: mineGameId })
+  const { data: pAfter } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  tap('mines_cashout banks the win', !error && data.state === 'cashed')
+  tap('  ...and credits the payout', Number(pAfter.balance) > Number(pBefore.balance))
+  tap('  ...and NOW reveals the full grid', Array.isArray(data.mine_positions))
+}
+// ATTACK: cash out again (double payout).
+{
+  const { data: pBefore } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  const { error } = await browser.rpc('mines_cashout', { p_game_id: mineGameId })
+  const { data: pAfter } = await admin.from('profiles').select('balance').eq('id', attackerId).single()
+  tap('ATTACK double-cashout is DENIED (no double payout)', !!error && Number(pBefore.balance) === Number(pAfter.balance))
+}
+// Losing path: start again, step on a mine.
+{
+  await admin.rpc('adjust_balance', { p_user: attackerId, p_delta: 100 })   // ensure funds
+  const { error: startErr } = await browser.rpc('mines_start', { p_amount: 10, p_mines: 24 })  // 24 mines
+  if (startErr) console.log('    (mines_start err:', startErr.message, ')')
+  const { data: g } = await admin.from('mines_games').select('game_id,mine_positions').eq('user_id', attackerId).eq('state', 'active').single()
+  const minePos = g.mine_positions[0]
+  const { data, error } = await browser.rpc('mines_reveal', { p_game_id: g.game_id, p_position: minePos })
+  if (error) console.log('    (mines_reveal err:', error.message, ')')
+  tap('stepping on a mine loses the game', !error && data.hit_mine === true && data.state === 'lost')
+  tap('  ...lost game reveals the grid', Array.isArray(data.mine_positions))
+  const { error: e2 } = await browser.rpc('mines_reveal', { p_game_id: g.game_id, p_position: 0 })
+  tap('ATTACK revealing after a loss is DENIED', !!e2)
+}
+
 // cleanup
 for (const id of [victimId, attackerId]) await admin.auth.admin.deleteUser(id)
 
