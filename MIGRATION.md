@@ -65,10 +65,11 @@ Schedule and phase definitions: `../Wager_Supabase_Migration_Workflow.docx`.
 - [x] **Phase 2 — Instant games** (Days 3–4): dice, limbo, plinko, all provably
       fair (`dice_roll`, `limbo_roll`, `plinko_drop`, `pf_plinko_path`,
       `game_seeds`, `rotate_seed`). Migrations `0005` and `0006`.
-- [~] **Phase 3 — Stateful games** (Days 5–6): **Mines done** — `0007_mines.sql`,
-      the first stateful game (start / reveal / cashout / active_game).
-      **Hilo not started**: no migration, no RPC. The `HiloV2` screen is routed
-      and has nothing behind it.
+- [x] **Phase 3 — Stateful games** (Days 5–6): Mines (`0007_mines.sql`) and Hilo
+      (`0008_hilo.sql`) — start / play / cashout / active_game on both, each
+      round a database row, so a refresh resumes the game. Hilo's screen is on
+      the RPCs; its socket shim is gone. Parity tests pass against the original
+      Node algorithms for both.
 - [ ] Phase 4 — Crash (Days 7–8): deterministic scheduled rounds + pg_cron
 - [ ] Phase 5 — Payments, comms, admin (Day 9): CCPayment Edge Functions, chat,
       admin data wiring
