@@ -29,11 +29,31 @@
 -- the ends: on an Ace (1) higher is strictly >, on a King (13) lower is
 -- strictly <. That is what makes an Ace's "lower" and a King's "higher" pay
 -- almost nothing, and it is deliberate in the original.
+--
+-- ── One difference from the original, deliberate and worth knowing ─────────
+--
+-- THE NONCE. The original deals the opening card with the seed's CURRENT nonce
+-- and increments afterwards, so a game's later rounds share a nonce with the
+-- next game's opening card. Here the nonce is incremented first and one nonce
+-- is pinned to the whole round, which is also what the Mines port does. Every
+-- card is still verifiable from (server_seed, client_seed, nonce, round) — the
+-- nonce a player verifies against is the one stored on their game — but a
+-- verifier written against the ORIGINAL's numbering will disagree about the
+-- first card. Changing it would make Hilo inconsistent with Mines, so it is
+-- recorded here rather than silently differing.
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
 -- The deck, in the original's fixed order. Position matters: the RNG indexes
 -- straight into this array, so any reordering changes every historical result.
+--
+-- The suits are \uXXXX ESCAPES, not literal glyphs, so every DATA line here is
+-- pure ASCII. Loaded through psql on a machine whose console is not UTF-8
+-- (Windows cp437, say) raw characters arrive double-encoded and every card
+-- comes out wrong - an audit saw parity fail 500/500 that way, and pass once
+-- the client encoding was pinned. jsonb decodes the escapes itself, so the
+-- stored value is identical either way and the file cannot be corrupted in
+-- transit. Comments above may hold non-ASCII; only the data matters.
 --
 -- IT IS NOT A VALID 52-CARD DECK, and that is faithful. Positions 51 and 52
 -- repeat Q♣ and 9♥; Q♥ and 9♠ appear nowhere. Every RANK still appears exactly
@@ -48,58 +68,58 @@ language sql immutable
 set search_path = public
 as $$
   select $json$[
-    {"rank":"A","suite":"♠","red":false,"number":161,"rank_value":1},
-    {"rank":"4","suite":"♥","red":true,"number":180,"rank_value":4},
-    {"rank":"7","suite":"♣","red":false,"number":199,"rank_value":7},
-    {"rank":"10","suite":"♦","red":true,"number":218,"rank_value":10},
-    {"rank":"2","suite":"♠","red":false,"number":162,"rank_value":2},
-    {"rank":"K","suite":"♣","red":false,"number":205,"rank_value":13},
-    {"rank":"5","suite":"♥","red":true,"number":181,"rank_value":5},
-    {"rank":"8","suite":"♣","red":false,"number":200,"rank_value":8},
-    {"rank":"J","suite":"♦","red":true,"number":219,"rank_value":11},
-    {"rank":"3","suite":"♠","red":false,"number":163,"rank_value":3},
-    {"rank":"6","suite":"♥","red":true,"number":182,"rank_value":6},
-    {"rank":"Q","suite":"♦","red":true,"number":220,"rank_value":12},
-    {"rank":"9","suite":"♣","red":false,"number":201,"rank_value":9},
-    {"rank":"A","suite":"♥","red":true,"number":177,"rank_value":1},
-    {"rank":"4","suite":"♣","red":false,"number":196,"rank_value":4},
-    {"rank":"7","suite":"♦","red":true,"number":215,"rank_value":7},
-    {"rank":"10","suite":"♠","red":false,"number":170,"rank_value":10},
-    {"rank":"2","suite":"♥","red":true,"number":178,"rank_value":2},
-    {"rank":"K","suite":"♦","red":true,"number":221,"rank_value":13},
-    {"rank":"5","suite":"♣","red":false,"number":197,"rank_value":5},
-    {"rank":"8","suite":"♦","red":true,"number":216,"rank_value":8},
-    {"rank":"J","suite":"♠","red":false,"number":171,"rank_value":11},
-    {"rank":"3","suite":"♥","red":true,"number":179,"rank_value":3},
-    {"rank":"6","suite":"♣","red":false,"number":198,"rank_value":6},
-    {"rank":"Q","suite":"♠","red":false,"number":172,"rank_value":12},
-    {"rank":"9","suite":"♦","red":true,"number":217,"rank_value":9},
-    {"rank":"A","suite":"♣","red":false,"number":193,"rank_value":1},
-    {"rank":"4","suite":"♦","red":true,"number":212,"rank_value":4},
-    {"rank":"7","suite":"♠","red":false,"number":167,"rank_value":7},
-    {"rank":"10","suite":"♥","red":true,"number":186,"rank_value":10},
-    {"rank":"2","suite":"♣","red":false,"number":194,"rank_value":2},
-    {"rank":"K","suite":"♠","red":false,"number":173,"rank_value":13},
-    {"rank":"5","suite":"♦","red":true,"number":213,"rank_value":5},
-    {"rank":"8","suite":"♠","red":false,"number":168,"rank_value":8},
-    {"rank":"J","suite":"♥","red":true,"number":187,"rank_value":11},
-    {"rank":"3","suite":"♣","red":false,"number":195,"rank_value":3},
-    {"rank":"6","suite":"♦","red":false,"number":214,"rank_value":6},
-    {"rank":"Q","suite":"♣","red":false,"number":188,"rank_value":12},
-    {"rank":"9","suite":"♥","red":true,"number":169,"rank_value":9},
-    {"rank":"A","suite":"♦","red":true,"number":209,"rank_value":1},
-    {"rank":"4","suite":"♠","red":false,"number":164,"rank_value":4},
-    {"rank":"7","suite":"♥","red":true,"number":183,"rank_value":7},
-    {"rank":"10","suite":"♣","red":false,"number":202,"rank_value":10},
-    {"rank":"2","suite":"♦","red":false,"number":210,"rank_value":2},
-    {"rank":"K","suite":"♥","red":true,"number":189,"rank_value":13},
-    {"rank":"5","suite":"♠","red":false,"number":165,"rank_value":5},
-    {"rank":"8","suite":"♥","red":true,"number":184,"rank_value":8},
-    {"rank":"J","suite":"♣","red":false,"number":203,"rank_value":11},
-    {"rank":"3","suite":"♦","red":false,"number":211,"rank_value":3},
-    {"rank":"6","suite":"♠","red":false,"number":166,"rank_value":6},
-    {"rank":"Q","suite":"♣","red":false,"number":204,"rank_value":12},
-    {"rank":"9","suite":"♥","red":true,"number":185,"rank_value":9}
+    {"rank":"A","suite":"\u2660","red":false,"number":161,"rank_value":1},
+    {"rank":"4","suite":"\u2665","red":true,"number":180,"rank_value":4},
+    {"rank":"7","suite":"\u2663","red":false,"number":199,"rank_value":7},
+    {"rank":"10","suite":"\u2666","red":true,"number":218,"rank_value":10},
+    {"rank":"2","suite":"\u2660","red":false,"number":162,"rank_value":2},
+    {"rank":"K","suite":"\u2663","red":false,"number":205,"rank_value":13},
+    {"rank":"5","suite":"\u2665","red":true,"number":181,"rank_value":5},
+    {"rank":"8","suite":"\u2663","red":false,"number":200,"rank_value":8},
+    {"rank":"J","suite":"\u2666","red":true,"number":219,"rank_value":11},
+    {"rank":"3","suite":"\u2660","red":false,"number":163,"rank_value":3},
+    {"rank":"6","suite":"\u2665","red":true,"number":182,"rank_value":6},
+    {"rank":"Q","suite":"\u2666","red":true,"number":220,"rank_value":12},
+    {"rank":"9","suite":"\u2663","red":false,"number":201,"rank_value":9},
+    {"rank":"A","suite":"\u2665","red":true,"number":177,"rank_value":1},
+    {"rank":"4","suite":"\u2663","red":false,"number":196,"rank_value":4},
+    {"rank":"7","suite":"\u2666","red":true,"number":215,"rank_value":7},
+    {"rank":"10","suite":"\u2660","red":false,"number":170,"rank_value":10},
+    {"rank":"2","suite":"\u2665","red":true,"number":178,"rank_value":2},
+    {"rank":"K","suite":"\u2666","red":true,"number":221,"rank_value":13},
+    {"rank":"5","suite":"\u2663","red":false,"number":197,"rank_value":5},
+    {"rank":"8","suite":"\u2666","red":true,"number":216,"rank_value":8},
+    {"rank":"J","suite":"\u2660","red":false,"number":171,"rank_value":11},
+    {"rank":"3","suite":"\u2665","red":true,"number":179,"rank_value":3},
+    {"rank":"6","suite":"\u2663","red":false,"number":198,"rank_value":6},
+    {"rank":"Q","suite":"\u2660","red":false,"number":172,"rank_value":12},
+    {"rank":"9","suite":"\u2666","red":true,"number":217,"rank_value":9},
+    {"rank":"A","suite":"\u2663","red":false,"number":193,"rank_value":1},
+    {"rank":"4","suite":"\u2666","red":true,"number":212,"rank_value":4},
+    {"rank":"7","suite":"\u2660","red":false,"number":167,"rank_value":7},
+    {"rank":"10","suite":"\u2665","red":true,"number":186,"rank_value":10},
+    {"rank":"2","suite":"\u2663","red":false,"number":194,"rank_value":2},
+    {"rank":"K","suite":"\u2660","red":false,"number":173,"rank_value":13},
+    {"rank":"5","suite":"\u2666","red":true,"number":213,"rank_value":5},
+    {"rank":"8","suite":"\u2660","red":false,"number":168,"rank_value":8},
+    {"rank":"J","suite":"\u2665","red":true,"number":187,"rank_value":11},
+    {"rank":"3","suite":"\u2663","red":false,"number":195,"rank_value":3},
+    {"rank":"6","suite":"\u2666","red":false,"number":214,"rank_value":6},
+    {"rank":"Q","suite":"\u2663","red":false,"number":188,"rank_value":12},
+    {"rank":"9","suite":"\u2665","red":true,"number":169,"rank_value":9},
+    {"rank":"A","suite":"\u2666","red":true,"number":209,"rank_value":1},
+    {"rank":"4","suite":"\u2660","red":false,"number":164,"rank_value":4},
+    {"rank":"7","suite":"\u2665","red":true,"number":183,"rank_value":7},
+    {"rank":"10","suite":"\u2663","red":false,"number":202,"rank_value":10},
+    {"rank":"2","suite":"\u2666","red":false,"number":210,"rank_value":2},
+    {"rank":"K","suite":"\u2665","red":true,"number":189,"rank_value":13},
+    {"rank":"5","suite":"\u2660","red":false,"number":165,"rank_value":5},
+    {"rank":"8","suite":"\u2665","red":true,"number":184,"rank_value":8},
+    {"rank":"J","suite":"\u2663","red":false,"number":203,"rank_value":11},
+    {"rank":"3","suite":"\u2666","red":false,"number":211,"rank_value":3},
+    {"rank":"6","suite":"\u2660","red":false,"number":166,"rank_value":6},
+    {"rank":"Q","suite":"\u2663","red":false,"number":204,"rank_value":12},
+    {"rank":"9","suite":"\u2665","red":true,"number":185,"rank_value":9}
   ]$json$::jsonb;
 $$;
 
@@ -216,8 +236,20 @@ create table public.hilo_games (
   rounds      jsonb not null default '[]'::jsonb,
   hi_chance   float8 not null,
   lo_chance   float8 not null,
-  profit      numeric(18,2) not null default 0,
-  payout      numeric(18,4) not null default 0.99,
+  /*
+   * UNSCALED on purpose. The next round's stake is bet_amount + profit, so
+   * rounding here compounds: at numeric(18,2) a 30-round run drifted 2.35 from
+   * the original's doubles, always in the player's favour. Money is rounded
+   * once, at settlement, by settle_bet.
+   */
+  profit      numeric not null default 0,
+  /*
+   * Unscaled, like profit above: it is 1 + profit/stake, so a scaled column
+   * rounds a number derived from an unrounded one and the two stop agreeing.
+   * Nothing is paid from this column - hilo_cashout recomputes the multiplier
+   * - so the width costs nothing.
+   */
+  payout      numeric not null default 0.99,
   state       text not null default 'active' check (state in ('active','lost','cashed')),
   created_at  timestamptz not null default now(),
   ended_at    timestamptz

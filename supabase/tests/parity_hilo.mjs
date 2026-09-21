@@ -193,6 +193,149 @@ const report = (what, i, expected, actual) => {
   console.log(`profit           ${rows.length} combinations compared`)
 }
 
+
+// 4. THE ROUND LOGIC, played for real.
+//
+// Sections 1-3 only exercise the three pure helpers. An audit mutated the win
+// rule, the 5000 cap and the opening nonce inside hilo_choice/hilo_start and
+// this file stayed green on all three, because nothing here ever played a
+// round. This section does: it starts a real game through the RPCs, drives a
+// scripted sequence of calls, and replays the same sequence in JS using the
+// ORIGINAL's arithmetic (handleHiloNextRound), comparing card, profit and
+// payout after every single call.
+{
+  /*
+   * A FIXED SEED that deals four Kings in a row, found by search.
+   *
+   * Random play does not reach the two rules that matter most. A tie needs the
+   * next card to repeat the current rank (~8% a round) and the 5000 cap needs a
+   * run of very unlikely wins; with four scripts of six rounds, neither showed
+   * up, and mutating the tie rule and the cap left this file green.
+   *
+   * Four Kings forces both at once: 'hi' off a King wins ONLY on a tie (nothing
+   * ranks above it), and each such win pays ~12.9x, so the third one takes the
+   * profit past 5000 and pins the cap.
+   */
+  const FORCED = {
+    server: '77a25f2d8a90417acc85f42adafe385f6bb70de30cfc5fdbd59ee303f30268cf',
+    client: 'parityforce',
+    nonce: 1,
+    script: ['hi', 'hi', 'hi'],
+  }
+
+  const SCRIPTS = [
+    ['hi', 'hi', 'hi', 'hi', 'hi', 'hi'],
+    ['lo', 'lo', 'lo', 'lo', 'lo', 'lo'],
+    ['hi', 'skip', 'hi', 'skip', 'lo', 'hi'],
+    ['lo', 'hi', 'lo', 'hi', 'lo', 'hi'],
+  ]
+  const STAKE = 13.37
+  let played = 0
+
+  const CASES = [...SCRIPTS.map((script) => ({ script, forced: null })),
+                 { script: FORCED.script, forced: FORCED }]
+
+  for (const [n, kase] of CASES.entries()) {
+    const script = kase.script
+    const uid = `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`
+    // Everything happens inside one DO block: psql's \gset does not survive
+    // being generated here, and a temp table gives the same rows without it.
+    const choices = script.map((c) => lit(c)).join(', ')
+    const sql = `
+      drop table if exists parity_play;
+      create temp table parity_play (seq int, card int, profit numeric, payout numeric, state text);
+      delete from auth.users where id = ${lit(uid)};
+      insert into auth.users (id, email) values (${lit(uid)}, ${lit('parity' + n + '@test.local')});
+      select public.adjust_balance(${lit(uid)}, 1000000);
+      select set_config('request.jwt.claim.sub', ${lit(uid)}, false);
+      ${kase.forced ? `
+      insert into public.game_seeds (user_id, game, server_seed_hash)
+        values (${lit(uid)}, 'hilo', '') on conflict (user_id, game) do nothing;
+      update public.game_seeds set server_seed = ${lit(kase.forced.server)},
+             client_seed = ${lit(kase.forced.client)}, nonce = ${kase.forced.nonce - 1}
+       where user_id = ${lit(uid)} and game = 'hilo';` : ''}
+      do $$
+      declare
+        v_game text;
+        v_choices text[] := array[${choices}];
+        v_i int;
+        v_g public.hilo_games;
+      begin
+        v_game := public.hilo_start(${STAKE}) ->> 'game_id';
+        select * into v_g from public.hilo_games where game_id = v_game;
+        insert into parity_play values (0, (v_g.rounds->0->>'number')::int, v_g.profit, v_g.payout, v_g.state);
+        for v_i in 1 .. array_length(v_choices, 1) loop
+          exit when (select state from public.hilo_games where game_id = v_game) <> 'active';
+          perform public.hilo_choice(v_game, v_choices[v_i]);
+          select * into v_g from public.hilo_games where game_id = v_game;
+          insert into parity_play values (v_i, (v_g.rounds->-1->>'number')::int, v_g.profit, v_g.payout, v_g.state);
+        end loop;
+        insert into parity_play values (-1, null, null, null,
+          (select server_seed || '|' || client_seed || '|' || nonce from public.hilo_games where game_id = v_game));
+      end $$;
+      select 'SEED|' || state from parity_play where seq = -1;
+      select 'R|' || seq || '|' || card || '|' || profit || '|' || payout || '|' || state
+        from parity_play where seq >= 0 order by seq;
+      delete from auth.users where id = ${lit(uid)};`
+    const f = join(tmpdir(), `philo_play_${process.pid}_${n}.sql`)
+    writeFileSync(f, sql)
+    const out = execFileSync(PSQL, [...CONN, '-f', f], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    const lines = out.split(String.fromCharCode(10)).map((l) => l.trim()).filter(Boolean)
+
+    const seedLine = lines.find((l) => l.startsWith('SEED|'))
+    if (!seedLine) { report('play', n, 'a game', 'no game started'); continue }
+    const [, server, client, nonceStr] = seedLine.split('|')
+    const nonce = Number(nonceStr)
+    const rows = lines.filter((l) => l.startsWith('R|')).map((l) => l.split('|'))
+
+    // --- the original's arithmetic, replayed ---
+    let card = pickRandomCard(client, server, nonce, 0)
+    let profit = 0
+    let payout = 0.99
+    let dead = false
+
+    for (const row of rows) {
+      const [, roundStr, numberStr, pgProfit, pgPayout, pgState] = row
+      const round = Number(roundStr)
+
+      if (round > 0) {
+        const choice = script[round - 1]
+        const prev = card
+        const { hi_chance, lo_chance } = calculateProbabilities(prev.rankValue)
+        const next = pickRandomCard(client, server, nonce, round)
+        const won = choice === 'skip' ? true
+          : choice === 'hi' ? (prev.rankValue === 1 ? next.rankValue > prev.rankValue : next.rankValue >= prev.rankValue)
+          : (prev.rankValue === 13 ? next.rankValue < prev.rankValue : next.rankValue <= prev.rankValue)
+        if (!won) {
+          profit = 0; payout = 0; dead = true
+        } else if (choice !== 'skip') {
+          const { hi_profit, lo_profit } = calculateProfit({ bet_amount: STAKE + profit, hi_chance, lo_chance })
+          const gain = choice === 'hi' ? hi_profit : lo_profit
+          payout = 1 + (profit + gain) / STAKE
+          profit = Math.min(5000, profit + gain)
+        }
+        card = next
+      }
+
+      if (Number(numberStr) !== card.number) {
+        report('play card', `${n}.${round}`, card.number, numberStr)
+      }
+      // Cents of tolerance would hide exactly the drift this is here to catch.
+      if (Math.abs(Number(pgProfit) - profit) > 1e-9) {
+        report('play profit', `${n}.${round}`, profit, pgProfit)
+      }
+      if (Math.abs(Number(pgPayout) - payout) > 1e-9) {
+        report('play payout', `${n}.${round}`, payout, pgPayout)
+      }
+      if (dead && pgState === 'active') {
+        report('play state', `${n}.${round}`, 'lost', pgState)
+      }
+      played++
+      if (dead) break
+    }
+  }
+  console.log(`rounds played    ${played} compared (card, profit, payout, state)`)
+}
 if (failures) {
   console.error(`\nFAIL — ${failures} mismatch(es). The port does not match the original.\n`)
   process.exit(1)

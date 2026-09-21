@@ -44,6 +44,17 @@ function toLegacyGame(cs, userId) {
     can_skip: Boolean(cs.can_skip),
     potential_payout: Number(cs.potential_payout),
     rounds: (cs.rounds || []).map((r) => ({
+      /*
+       * `card` IS THE CARD, as far as the components are concerned.
+       *
+       * HiloGameView, HiloActiveCards and HiloControl all read `round.card` —
+       * the deck POSITION NUMBER — and resolve the rank and suit from it via
+       * useDeck().getCardRank/getCardSuite. Without it every face on screen
+       * renders blank: getCardRank(undefined) returns ''. The cardRank /
+       * cardSuite pair below is the Mongo document shape the old context
+       * exposed; some components read those too, so both are provided.
+       */
+      card: r.number,
       cardRank: r.rank,
       cardSuite: r.suite,
       cardRankNumber: r.rank_value,
