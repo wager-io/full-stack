@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import api from '../../utils/api'
+import { rpc } from '../../lib/realtime'
 import { format } from 'date-fns'
 import { FaUser, FaCalendarAlt, FaTrophy, FaDice, FaChartLine, FaMoneyBillWave, FaArrowUp, FaArrowDown, FaTimes } from 'react-icons/fa'
 import Loader from '../common/Loader'
@@ -28,15 +28,24 @@ export default function Statistics({isOpen}) {
           return
         }
         
-        const response = await api.get(`/api/user/stats/${username}`)
-        if (response.data.success) {
-          setStats(response.data.data)
+        // Was GET /api/user/stats/:username through src/utils/api.js — the axios
+        // base for the removed Express server, so this screen could only ever
+        // reach its error branch. Same figures, one RPC.
+        const res = await rpc('user_stats', { p_username: username })
+        if (res.code === 0) {
+          setStats(res.data)
+        } else if (res.message?.includes('user_not_found')) {
+          setError('No player with that name')
+        } else if (res.message?.includes('user_is_private')) {
+          // hidden_from_public is already honoured in the public bet feed;
+          // the same player should not be readable by name here.
+          setError('This player keeps their statistics private')
         } else {
-          setError(response.data.message || 'Failed to fetch user statistics')
+          setError(res.message || 'Failed to fetch user statistics')
         }
       } catch (err) {
         console.error('Error fetching user statistics:', err)
-        setError(err.response?.data?.message || 'An error occurred while fetching user statistics')
+        setError('An error occurred while fetching user statistics')
       } finally {
         setLoading(false)
       }
