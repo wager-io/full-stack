@@ -39,6 +39,70 @@
 create unique index if not exists profiles_username_lower_key
   on public.profiles (lower(username)) where username is not null;
 
+/*
+ * THE INDEX BREAKS SIGNUP UNLESS THE TRIGGER IS TAUGHT ABOUT IT.
+ *
+ * handle_new_user (0002) derives a username from the email local part and
+ * inserts it with only `on conflict (id) do nothing`. Username had no
+ * uniqueness before this file, so with the index in place the SECOND person
+ * whose local part collides — john@a.com then john@gmail.com — raises inside
+ * the trigger, which aborts the auth.users insert. Supabase shows that as
+ * "Database error saving new user": signup simply stops working, and anyone
+ * can deny a name by registering it first.
+ *
+ * So the trigger now finds a free name instead of failing. The base is
+ * sanitised to what profile_set_username would accept, then suffixed until it
+ * is free; after 50 attempts it falls back to the row id, which cannot
+ * collide. The loop catches unique_violation as well as testing first, because
+ * two signups racing can both see the same name as free.
+ *
+ * NOTE FOR DEPLOYMENT: if a database already holds two profiles whose
+ * usernames differ only by case, the index at the top of this file will refuse
+ * to build and this migration will not apply. Check before deploying:
+ *   select lower(username), count(*) from public.profiles
+ *    where username is not null group by 1 having count(*) > 1;
+ */
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_base text;
+  v_name text;
+  v_try  int := 0;
+begin
+  v_base := coalesce(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
+  -- Keep only what profile_set_username allows, so a name handed out at signup
+  -- is one the player could also have chosen themselves.
+  v_base := regexp_replace(coalesce(v_base, ''), '[^A-Za-z0-9_]', '', 'g');
+  v_base := left(v_base, 16);
+  if length(v_base) < 3 then v_base := 'player'; end if;
+
+  v_name := v_base;
+  loop
+    begin
+      insert into public.profiles (id, email, username)
+      values (new.id, new.email, v_name)
+      on conflict (id) do nothing;
+      exit;                                   -- name was free
+    exception when unique_violation then
+      v_try := v_try + 1;
+      if v_try > 50 then
+        -- Cannot collide: one row, one id.
+        v_name := left(v_base, 8) || '_' || replace(new.id::text, '-', '');
+      else
+        v_name := left(v_base, 16) || '_' || lpad(v_try::text, 2, '0');
+      end if;
+    end;
+  end loop;
+
+  insert into public.vip_progress (user_id)
+  values (new.id)
+  on conflict (user_id) do nothing;
+
+  return new;
+end $$;
+
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+
 create or replace function public.profile_set_username(p_username text)
 returns jsonb
 language plpgsql
@@ -213,10 +277,20 @@ declare
   v_user     uuid := auth.uid();
   v_existing uuid;
   v_referrer public.profiles;
+  v_rows     int;
 begin
   if v_user is null then raise exception 'not_authenticated'; end if;
 
-  select referred_by into v_existing from public.profiles where id = v_user;
+  /*
+   * Read the row FOR UPDATE, so two calls cannot both see it unset.
+   *
+   * Checking and then writing is not set-once: under READ COMMITTED two
+   * concurrent calls both read NULL, the second waits on the row lock, then
+   * overwrites — and BOTH referrers get their referral_count incremented. The
+   * lock closes the window, and the conditional update below is the belt to
+   * its braces.
+   */
+  select referred_by into v_existing from public.profiles where id = v_user for update;
   if v_existing is not null then raise exception 'already_referred'; end if;
 
   select * into v_referrer from public.profiles
@@ -230,7 +304,16 @@ begin
   -- balance. Raised for these two writes and lowered straight after, so the
   -- opening is as narrow as the work.
   perform set_config('app.allow_balance_change', 'on', true);
-  update public.profiles set referred_by = v_referrer.id where id = v_user;
+  -- `and referred_by is null` makes the write itself the set-once guarantee:
+  -- if anything slipped past the check above, this affects no rows and the
+  -- referrer is not credited.
+  update public.profiles set referred_by = v_referrer.id
+   where id = v_user and referred_by is null;
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then
+    perform set_config('app.allow_balance_change', 'off', true);
+    raise exception 'already_referred';
+  end if;
   update public.profiles set referral_count = coalesce(referral_count, 0) + 1
    where id = v_referrer.id;
   perform set_config('app.allow_balance_change', 'off', true);
@@ -324,9 +407,24 @@ begin
     end if;
   end loop;
 
-  insert into public.notification_preferences (user_id, prefs)
-  values (v_user, (select prefs from public.notification_preferences where user_id = v_user) || v_clean)
-  on conflict (user_id) do update set prefs = public.notification_preferences.prefs || v_clean;
+  /*
+   * Make the row exist FIRST, then merge into it.
+   *
+   * Two bugs live here if you take a shortcut. Merging into a subselect that
+   * returns NULL gives NULL (prefs is NOT NULL), so the first save from a
+   * fresh account failed outright — hidden in testing by calling the getter
+   * beforehand. Merging into '{}' instead fixes the error but drops the eight
+   * defaults the player never touched, silently turning them off.
+   *
+   * Inserting the bare row lets the column DEFAULT supply all nine, and the
+   * update then changes only what was sent.
+   */
+  insert into public.notification_preferences (user_id) values (v_user)
+  on conflict (user_id) do nothing;
+
+  update public.notification_preferences
+     set prefs = prefs || v_clean
+   where user_id = v_user;
 
   return (select prefs from public.notification_preferences where user_id = v_user);
 end $$;

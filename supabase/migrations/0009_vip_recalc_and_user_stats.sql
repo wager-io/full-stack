@@ -215,21 +215,42 @@ begin
     from public.bets
    where user_id = v_p.id and state <> 'pending';
 
-  select coalesce(jsonb_object_agg(g.game, g.stats), '{}'::jsonb) into v_games
-    from (
-      select b.game,
-             jsonb_build_object(
-               'totalBets',  count(*),
-               'totalWins',  count(*) filter (where b.state = 'won'),
-               'totalLosses', count(*) filter (where b.state = 'lost'),
-               'wagered',    coalesce(sum(b.bet_amount), 0),
-               'profit',     coalesce(sum(b.profit), 0)
-             ) as stats
-        from public.bets b
-       where b.user_id = v_p.id and b.state <> 'pending'
-       group by b.game
-    ) g;
-
+  /*
+   * EVERY game, with the keys the modal reads.
+   *
+   * Two mistakes to avoid here, both of which shipped once:
+   *
+   *   The component reads data.bets / data.wins / data.losses / data.profitLoss
+   *   (GameRow in src/components/Modals/Statistics.jsx), NOT the totalBets /
+   *   profit names used at the top level. The old Express endpoint returned
+   *   these names, which is why the component reads them.
+   *
+   *   It renders a row for crash, dice, plinko, mines, hilo and limbo
+   *   unconditionally, so a game the player has never touched must still
+   *   appear. Aggregating only over games with bets left those undefined and
+   *   the page threw on data.bets.toLocaleString().
+   *
+   * So: start from the fixed list of games and left-join the totals onto it.
+   */
+  select jsonb_object_agg(g.game, jsonb_build_object(
+           'bets',       coalesce(b.bets, 0),
+           'wins',       coalesce(b.wins, 0),
+           'losses',     coalesce(b.losses, 0),
+           'wagered',    coalesce(b.wagered, 0),
+           'profitLoss', coalesce(b.profit, 0)
+         )) into v_games
+    from (values ('crash'), ('dice'), ('plinko'), ('mines'), ('hilo'), ('limbo'), ('keno')) as g(game)
+    left join (
+      select game,
+             count(*)                                as bets,
+             count(*) filter (where state = 'won')   as wins,
+             count(*) filter (where state = 'lost')  as losses,
+             coalesce(sum(bet_amount), 0)            as wagered,
+             coalesce(sum(profit), 0)                as profit
+        from public.bets
+       where user_id = v_p.id and state <> 'pending'
+       group by game
+    ) b on b.game = g.game;
   return jsonb_build_object(
     'username',    v_p.username,
     'joinedDate',  v_p.created_at,

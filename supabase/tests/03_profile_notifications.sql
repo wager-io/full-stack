@@ -89,6 +89,16 @@ begin
   end if;
 
   -- Set once. A referral that can be re-pointed is a commission that can be moved.
+  --
+  -- WHAT THIS CHECK DOES NOT PROVE. The RPC has two guards: a `select ... for
+  -- update` that locks the row before the read, and an `and referred_by is
+  -- null` on the write itself. This is a single session, so only the first one
+  -- is ever reached here -- deleting the conditional write leaves this check
+  -- green, and that was verified, not assumed. The conditional write only
+  -- matters if two calls arrive at once, which no DO block can arrange. The
+  -- second guard is therefore carried on the argument in the migration's
+  -- comment, not on a test. Proving it needs two concurrent connections, which
+  -- this harness (psql, one session) cannot open.
   begin
     perform public.profile_register_referral(v_code);
     raise exception 'FAIL: a referral was registered twice';
@@ -96,6 +106,25 @@ begin
     if sqlerrm not like '%already_referred%' and sqlerrm not like 'FAIL:%' then raise; end if;
     if sqlerrm like 'FAIL:%' then raise; end if;
   end;
+
+  -- === signup must survive a colliding email local part ======================
+  -- The case-insensitive username index added by 0010 collides with the signup
+  -- trigger, which derives a username from the email local part. Before the
+  -- trigger was taught to find a free name, the SECOND of these raised inside
+  -- the trigger and aborted the auth.users insert entirely: signup stopped
+  -- working, and any name could be denied by registering it first.
+  delete from auth.users where email like 'collide@%';
+  insert into auth.users (id, email) values (gen_random_uuid(), 'collide@one.test');
+  insert into auth.users (id, email) values (gen_random_uuid(), 'collide@two.test');
+  insert into auth.users (id, email) values (gen_random_uuid(), 'collide@three.test');
+  if (select count(*) from public.profiles where email like 'collide@%') <> 3 then
+    raise exception 'FAIL: colliding signups did not all create profiles (got %)',
+      (select count(*) from public.profiles where email like 'collide@%');
+  end if;
+  if (select count(distinct lower(username)) from public.profiles where email like 'collide@%') <> 3 then
+    raise exception 'FAIL: colliding signups did not get distinct usernames';
+  end if;
+  delete from auth.users where email like 'collide@%';
 
   -- === notifications ========================================================
   insert into public.notifications (user_id, type, title, message)
@@ -142,6 +171,20 @@ begin
   end if;
 
   -- === preferences ==========================================================
+  -- FIRST save on an account that has never read its preferences. This used to
+  -- fail outright (NULL || jsonb against a NOT NULL column), and the obvious
+  -- repair — merging into '{}' — silently switched off the eight defaults the
+  -- player never touched. Both are wrong; both are checked.
+  delete from public.notification_preferences where user_id = v_b;
+  v_res := public.notification_set_preferences('{"levelUp": false}'::jsonb);
+  if (v_res->>'levelUp')::boolean is not false then
+    raise exception 'FAIL: the first save did not take';
+  end if;
+  if (v_res->>'betWin')::boolean is not true or (v_res->>'emailEnabled')::boolean is not true then
+    raise exception 'FAIL: the first save dropped the defaults: %', v_res;
+  end if;
+  delete from public.notification_preferences where user_id = v_b;
+
   v_res := public.notification_preferences();
   if (v_res->>'betWin')::boolean is not true or (v_res->>'emailEnabled')::boolean is not true then
     raise exception 'FAIL: defaults are not all on: %', v_res;

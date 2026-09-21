@@ -43,8 +43,24 @@ begin
       v_tier.current_tier, v_tier.wager_to_next_tier;
   end if;
 
-  -- --- crossing into Bronze (10,000) ---------------------------------------
-  perform public.place_bet('dice', 7000);                    -- 12,000 total
+  -- --- EXACTLY on the threshold ---------------------------------------------
+  -- 5,000 + 5,000 = 10,000, Bronze's requirement to the penny. Without this
+  -- case, changing vip_recalc's `required_wager <= v_wager` to `<` still
+  -- passed every check here: nothing ever landed on a boundary, so the
+  -- boundary was never tested.
+  perform public.place_bet('dice', 5000);                    -- 10,000 exactly
+  select current_tier, next_tier, wager_to_next_tier into v_tier
+    from public.vip_progress where user_id = v_user;
+  if v_tier.current_tier <> 'Bronze' then
+    raise exception 'FAIL: exactly 10,000 should BE Bronze, got %', v_tier.current_tier;
+  end if;
+  if v_tier.wager_to_next_tier <> 40000 then
+    raise exception 'FAIL: at exactly Bronze, 40,000 should remain to Silver, got %',
+      v_tier.wager_to_next_tier;
+  end if;
+
+  -- --- and onward ------------------------------------------------------------
+  perform public.place_bet('dice', 2000);                    -- 12,000 total
   select current_tier, next_tier, wager_to_next_tier into v_tier
     from public.vip_progress where user_id = v_user;
   if v_tier.current_tier <> 'Bronze' or v_tier.next_tier <> 'Silver' then
