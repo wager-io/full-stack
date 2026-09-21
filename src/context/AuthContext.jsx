@@ -183,15 +183,31 @@ export const AuthProvider = ({ children }) => {
     setUserVipTier(null);
   };
 
+  // Goes through profile_set_details (0013) rather than writing the table.
+  //
+  // Two reasons. The browser no longer holds UPDATE on profiles at all, so a
+  // direct write is refused now. And the direct write never worked anyway: it
+  // sent the form's camelCase keys (firstName, dateOfBirth, postalCode) at
+  // snake_case columns, so PostgREST rejected every statement and this modal
+  // has never saved anything. The RPC takes the names the form sends and
+  // returns the saved row, which is what goes into state.
   const updateUserDetails = async (details) => {
     try {
       if (!user?.id) return;
-      const { error } = await supabase
-        .from('profiles')
-        .update(details)
-        .eq('id', user.id);
-      if (error) throw error;
-      setUser({ ...user, ...details });
+      const { data, error } = await supabase.rpc('profile_set_details', {
+        p_details: details,
+      });
+      if (error) {
+        if (error.message?.includes('under_18')) {
+          throw new Error('You must be 18 or older to play.');
+        }
+        if (error.message?.includes('invalid_date_of_birth')) {
+          throw new Error('That date of birth is not valid.');
+        }
+        throw error;
+      }
+      // The row comes back in database spelling; keep state in step with it.
+      setUser({ ...user, ...(data || {}) });
     } catch (error) {
       console.error('Error updating user details:', error);
       throw error;

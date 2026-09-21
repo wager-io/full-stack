@@ -107,16 +107,32 @@ begin
     raise exception 'FAIL: a hidden player must still see their own stats (%)', sqlerrm;
   end;
 
+  -- Case-insensitive, because uniqueness is. Before 0013 this raised.
+  if public.user_stats('VIPSTATS_TESTER')->>'username' <> 'vipstats_tester' then
+    raise exception 'FAIL: the lookup is still case-sensitive';
+  end if;
+
   perform set_config('request.jwt.claim.sub', '33333333-3333-3333-3333-333333333333', false);
   begin
     perform public.user_stats('vipstats_tester');
     raise exception 'FAIL: a hidden player was readable by another user';
   exception
     when sqlstate 'P0001' then
-      if sqlerrm not like '%user_is_private%' and sqlerrm not like 'FAIL:%' then
-        raise;                                  -- some other error: surface it
-      end if;
       if sqlerrm like 'FAIL:%' then raise; end if;
+      -- 0013: a hidden player and a name nobody holds give the SAME answer.
+      -- Two different answers told a stranger which names exist.
+      if sqlerrm not like '%user_not_found%' then
+        raise exception 'FAIL: expected user_not_found for a hidden player, got %', sqlerrm;
+      end if;
+  end;
+
+  -- ...and the same answer for a name that was never taken.
+  begin
+    perform public.user_stats('nobody_by_that_name');
+    raise exception 'FAIL: an unknown name returned stats';
+  exception when sqlstate 'P0001' then
+    if sqlerrm like 'FAIL:%' then raise; end if;
+    if sqlerrm not like '%user_not_found%' then raise; end if;
   end;
 
   -- --- cleanup --------------------------------------------------------------
