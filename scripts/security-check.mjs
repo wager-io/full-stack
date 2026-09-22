@@ -111,11 +111,21 @@ console.log('\n  --- attacks over the real REST API, as a logged-in player ---')
   const { data } = await admin.from('profiles').select('commission_rate').eq('id', attackerId).single()
   tap('ATTACK raising own commission_rate is BLOCKED', Number(data.commission_rate) === 25)
 }
-// Legit action still works
+// ATTACK 10: write a profile column directly, going around the RPC that guards it
 {
-  const { error } = await browser.from('profiles').update({ username: 'renamed_ok' }).eq('id', attackerId)
+  // 0013 revoked UPDATE on public.profiles from `authenticated`. Until
+  // then the profile RPCs' validation was advisory: the browser held the grant and could
+  // write the columns itself. 'x' is one character, which profile_set_username
+  // refuses — so a direct write landing it would prove the rule was decorative.
+  const { error } = await browser.from('profiles').update({ username: 'x' }).eq('id', attackerId)
   const { data } = await admin.from('profiles').select('username').eq('id', attackerId).single()
-  tap('player CAN still edit own username', !error && data.username === 'renamed_ok')
+  tap('ATTACK writing profiles directly is DENIED', !!error && data.username !== 'x')
+}
+// Legit action still works — through the RPC, which is now the only door in
+{
+  const { error } = await browser.rpc('profile_set_username', { p_username: 'renamed_ok' })
+  const { data } = await admin.from('profiles').select('username').eq('id', attackerId).single()
+  tap('player CAN still edit own username (profile_set_username)', !error && data.username === 'renamed_ok')
 }
 // hidden_from_public respected on the public view
 {

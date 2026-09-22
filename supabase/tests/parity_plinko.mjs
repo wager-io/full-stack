@@ -1,13 +1,30 @@
 // Byte-parity: original Node plinko vs Postgres port, over every risk/row combo.
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
-const { PAYOUTS } = require('c:/Users/valia/Documents/projects/wager/stake-cloneBackend/controllers/games/plinko/plinkoLogic.js')
+// The original backend, for the algorithm this test compares against.
+//
+// This was an absolute path into one developer's home directory
+// (c:/Users/valia/...), so the test could only ever run on that machine —
+// everywhere else it died in the module loader before comparing anything.
+// Now: $WAGER_BACKEND if set, otherwise a stake-cloneBackend checkout beside
+// this repo, which is where the other clones sit.
+const BACKEND = process.env.WAGER_BACKEND
+  ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'stake-cloneBackend')
+const PLINKO_LOGIC = join(BACKEND, 'controllers', 'games', 'plinko', 'plinkoLogic.js')
+
+if (!existsSync(PLINKO_LOGIC)) {
+  console.error(`\nFAIL — cannot verify: no plinkoLogic.js at ${PLINKO_LOGIC}`)
+  console.error('Clone wager-io/stake-cloneBackend beside this repo, or set WAGER_BACKEND.\n')
+  process.exit(1)
+}
+const { PAYOUTS } = require(PLINKO_LOGIC)
 
 // --- original algorithms, verbatim -----------------------------------------
 function generateHash(clientSeed, nonce, serverSeed) {

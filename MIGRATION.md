@@ -49,13 +49,27 @@ supabase/functions/ Edge Functions (added in later phases: payments, etc.)
 ## Migration status
 Schedule and phase definitions: `../Wager_Supabase_Migration_Workflow.docx`.
 
+> **Corrected 18 Sep 2026.** This list said Phases 1–3 were unstarted while the
+> migrations for all three were already committed — `0004` through `0007`, in
+> commits dated 12–14 July. Anyone planning from it would have rebuilt work that
+> exists. The status below is what the repository actually contains; when a phase
+> lands, tick it here in the same commit.
+
 - [x] **Phase 0 — Foundation** (Day 1): unified app, admin at `/admin`, core schema
   (profiles/bills/vip/notifications/chat) + RLS + balance guard, Supabase Auth
   wired into AuthContext, live balance via profiles subscription. Function grants
   locked down, admin bootstrap. **Builds.**
-- [ ] Phase 1 — Identity & money (Day 2): wallet ledger RPCs, global bet feed
-- [ ] Phase 2 — Instant games (Days 3–4): dice, limbo, plinko
-- [ ] Phase 3 — Stateful games (Days 5–6): mines, hilo
+- [x] **Phase 1 — Identity & money** (Day 2): wallet ledger RPCs (`adjust_balance`,
+      `guard_balance_change`, `bills`), bets table and global feed (`place_bet`,
+      `settle_bet`, `my_recent_bets`). Migration `0004_bets_and_ledger.sql`.
+- [x] **Phase 2 — Instant games** (Days 3–4): dice, limbo, plinko, all provably
+      fair (`dice_roll`, `limbo_roll`, `plinko_drop`, `pf_plinko_path`,
+      `game_seeds`, `rotate_seed`). Migrations `0005` and `0006`.
+- [x] **Phase 3 — Stateful games** (Days 5–6): Mines (`0007_mines.sql`) and Hilo
+      (`0008_hilo.sql`) — start / play / cashout / active_game on both, each
+      round a database row, so a refresh resumes the game. Hilo's screen is on
+      the RPCs; its socket shim is gone. Parity tests pass against the original
+      Node algorithms for both.
 - [ ] Phase 4 — Crash (Days 7–8): deterministic scheduled rounds + pg_cron
 - [ ] Phase 5 — Payments, comms, admin (Day 9): CCPayment Edge Functions, chat,
       admin data wiring
