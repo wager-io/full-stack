@@ -35,11 +35,11 @@ export default function Statistics({isOpen}) {
         if (res.code === 0) {
           setStats(res.data)
         } else if (res.message?.includes('user_not_found')) {
+          // The only answer for both 'no such player' and 'hidden themselves'.
+          // 0013 collapsed the two deliberately: distinct replies let anyone
+          // test whether a username exists, which is most of what hiding was
+          // for. There is no user_is_private branch to write any more.
           setError('No player with that name')
-        } else if (res.message?.includes('user_is_private')) {
-          // hidden_from_public is already honoured in the public bet feed;
-          // the same player should not be readable by name here.
-          setError('This player keeps their statistics private')
         } else {
           setError(res.message || 'Failed to fetch user statistics')
         }
