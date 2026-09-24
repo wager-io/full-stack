@@ -59,3 +59,17 @@ verify_enabled = true
 
 [edge_runtime]
 enabled = true
+
+# ---------------------------------------------------------------------------
+# CCPayment posts here as CCPayment, not as a logged-in user, so it carries no
+# Supabase JWT. Left at the default, the platform would reject every webhook
+# with a 401 before the function ran, and CCPayment would retry a delivery that
+# can never succeed.
+#
+# The endpoint is NOT unauthenticated as a result: it authenticates the caller
+# itself, by HMAC over the raw body (see _shared/ccpayment.ts), which is the
+# only check that actually proves CCPayment sent it. An anon-key JWT would
+# prove nothing here — that key ships in the browser bundle.
+# ---------------------------------------------------------------------------
+[functions.ccpayment-webhook]
+verify_jwt = false
