@@ -73,3 +73,13 @@ enabled = true
 # ---------------------------------------------------------------------------
 [functions.ccpayment-webhook]
 verify_jwt = false
+
+# These two are called BY the browser, by a signed-in player, so the JWT is
+# left on: it is the only thing that says which player is asking, and both
+# functions key their answer off it — the deposit address a player is given,
+# and the balance a withdrawal debits.
+[functions.ccpayment-address]
+verify_jwt = true
+
+[functions.ccpayment-withdraw]
+verify_jwt = true

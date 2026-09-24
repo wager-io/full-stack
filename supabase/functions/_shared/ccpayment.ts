@@ -197,6 +197,69 @@ export async function ccRequest<T = Record<string, unknown>>(
   return json.data as T;
 }
 
+/**
+ * The permanent deposit address for one player on one chain.
+ *
+ * `referenceId` is the whole mechanism: CCPayment returns the same address for
+ * the same referenceId forever, and echoes it back on every deposit webhook,
+ * which is how an incoming payment finds its owner. The format is the
+ * original's — `user_<uuid>_chain_<CHAIN>` — and must stay that way, because
+ * addresses already issued are keyed by it. CCPayment caps it at 64 chars; a
+ * UUID plus the fixed parts leaves room for any chain symbol.
+ */
+export function getOrCreateDepositAddress(referenceId: string, chain: string) {
+  if (referenceId.length < 3 || referenceId.length > 64) {
+    throw new Error(`referenceId must be 3-64 characters, got ${referenceId.length}`);
+  }
+  return ccRequest<{ address: string; memo?: string }>(
+    "getOrCreateAppDepositAddress",
+    { referenceId, chain },
+  );
+}
+
+/** The coins CCPayment will send, with the numeric coinId its API wants. */
+export function getCoinList() {
+  return ccRequest<{
+    coins?: Array<{
+      coinId: number;
+      symbol: string;
+      networks?: Record<string, { chain: string; canWithdraw?: boolean; minimumWithdrawAmount?: string }>;
+    }>;
+  }>("getCoinList", {});
+}
+
+/**
+ * Send funds out.
+ *
+ * `orderId` is OURS and comes from the ccp_withdrawals row — generated in the
+ * same transaction that debited the balance. The original minted its own here
+ * (`userId + timestamp`), which meant the id identifying the payment was
+ * created after the money had already moved and in a different place; if this
+ * call then failed, nothing tied the two together. Passing the row's id means
+ * the withdrawal webhook can always find the row to settle or refund.
+ */
+export function applyWithdrawToNetwork(req: {
+  orderId: string;
+  coinId: number;
+  chain: string;
+  address: string;
+  amount: string;
+  memo?: string;
+  merchantPayNetworkFee?: boolean;
+}) {
+  const body: Record<string, unknown> = {
+    coinId: req.coinId,
+    chain: req.chain,
+    address: req.address,
+    orderId: req.orderId,
+    amount: req.amount,
+  };
+  if (req.memo) body.memo = req.memo;
+  if (req.merchantPayNetworkFee !== undefined) body.merchantPayNetworkFee = req.merchantPayNetworkFee;
+
+  return ccRequest<{ recordId?: string }>("applyAppWithdrawToNetwork", body);
+}
+
 /** The deposit record — the only place a deposit's amount and USD price come from. */
 export function getDepositRecord(recordId: string) {
   return ccRequest<{
