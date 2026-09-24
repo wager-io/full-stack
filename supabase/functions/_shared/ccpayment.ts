@@ -141,7 +141,22 @@ function proxyFetch(): typeof fetch {
     return fetch;
   }
 
-  const client = createHttpClient({ proxy: { url: PROXY_URL } });
+  // Credentials must be passed as an explicit basicAuth object. Deno does NOT
+  // read user:pass out of the proxy URL's userinfo — left in the url string
+  // they are silently ignored and the proxy answers 407, which reads like a
+  // wrong password rather than like credentials that were never sent.
+  const u = new URL(PROXY_URL);
+  const proxy: { url: string; basicAuth?: { username: string; password: string } } = {
+    url: `${u.protocol}//${u.host}`,
+  };
+  if (u.username) {
+    proxy.basicAuth = {
+      username: decodeURIComponent(u.username),
+      password: decodeURIComponent(u.password),
+    };
+  }
+
+  const client = createHttpClient({ proxy });
   return ((input: string | URL | Request, init?: RequestInit) =>
     fetch(input, { ...init, client } as RequestInit)) as typeof fetch;
 }
