@@ -83,3 +83,13 @@ verify_jwt = true
 
 [functions.ccpayment-withdraw]
 verify_jwt = true
+
+# tron-address is called by a signed-in player; the JWT is what says which
+# player gets which address, so it stays on.
+[functions.tron-address]
+verify_jwt = true
+
+# tron-watch is driven by cron, which has no user session. It authenticates
+# itself against TRON_WATCHER_SECRET instead — see the function header.
+[functions.tron-watch]
+verify_jwt = false
