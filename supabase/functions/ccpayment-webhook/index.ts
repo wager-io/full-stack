@@ -33,7 +33,7 @@
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { getDepositRecord, verifyWebhook } from "../_shared/ccpayment.ts";
+import { getDepositRecord, getWithdrawalRecord, verifyWebhook } from "../_shared/ccpayment.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -177,10 +177,27 @@ async function handleDeposit(msg: Record<string, unknown>, payload: unknown): Pr
 /**
  * A withdrawal moved on.
  *
- * All the judgement — mapping CCPayment's status onto ours, and refunding a
- * failure exactly once — is in ccp_settle_withdrawal. This only carries the
- * message.
+ * Drives the state machine in 0017 rather than the old ccp_settle_withdrawal,
+ * which 0019 removes. The difference that matters: a failure here does not
+ * "refund" by crediting the balance, it ROLLS BACK a clearing hold. The money
+ * never left the player's row, so there is nothing to put back — only a hold
+ * to release. That is what makes a replayed webhook harmless.
+ *
+ * Each of the three RPCs is idempotent and refuses an illegal transition
+ * instead of forcing one, so a delivery that arrives twice, or out of order —
+ * which CCPayment does not promise against — cannot double-confirm, double-
+ * release, or walk a CONFIRMED withdrawal backwards.
  */
+function withdrawalTransition(status: string): "confirm" | "broadcast" | "rollback" | null {
+  if (status === "Success") return "confirm";
+  if (status === "Processing") return "broadcast";
+  if (status === "Failed" || status === "Rejected") return "rollback";
+  // WaitingApproval, or a status we do not recognise. Doing nothing is the
+  // right answer to a word we cannot interpret: the funds stay held and a
+  // person can look.
+  return null;
+}
+
 async function handleWithdrawal(msg: Record<string, unknown>, payload: unknown): Promise<Response> {
   const orderId = String(msg.orderId ?? "");
   if (!orderId) {
@@ -188,19 +205,51 @@ async function handleWithdrawal(msg: Record<string, unknown>, payload: unknown):
     return ok();
   }
 
-  const { data: result, error } = await supabase.rpc("ccp_settle_withdrawal", {
-    p_order_id: orderId,
-    p_cc_status: String(msg.status ?? ""),
-    p_raw: { webhook: payload },
-  });
+  const status = String(msg.status ?? "");
+  const transition = withdrawalTransition(status);
+  if (transition === null) {
+    console.log(`[ccpayment-webhook] withdrawal ${orderId}: status '${status}' — no transition`);
+    return ok();
+  }
 
-  if (error) throw new Error(`ccp_settle_withdrawal: ${error.message}`);
+  // The tx hash is the one thing a player actually wants, and it only appears
+  // on the record. Best effort: never block settlement on fetching it.
+  let txHash: string | null = null;
+  try {
+    const rec = await getWithdrawalRecord(orderId);
+    txHash = (rec?.record?.txId ?? null) as string | null;
+  } catch (err) {
+    console.warn(`[ccpayment-webhook] could not read withdrawal record ${orderId}:`, err);
+  }
 
-  const action = (result as { action?: string } | null)?.action;
-  if (action === "unknown_order") {
-    console.error(`[ccpayment-webhook] withdrawal ${orderId}: no such order`);
+  const raw = { webhook: payload };
+  const args: Record<string, unknown> =
+    transition === "confirm"
+      ? { p_order_id: orderId, p_tx_hash: txHash, p_raw: raw }
+      : transition === "broadcast"
+      ? { p_order_id: orderId, p_tx_hash: txHash, p_record_id: null, p_raw: raw, p_coin_amount: null }
+      : { p_order_id: orderId, p_reason: `ccpayment reported ${status}`, p_raw: raw };
+
+  const { data: result, error } = await supabase.rpc(`${transition}_withdrawal`, args);
+
+  // Thrown, not swallowed: the caller turns this into a 500 so CCPayment
+  // retries. Acking a settlement we failed to apply is how a withdrawal gets
+  // stranded mid-flight.
+  if (error) throw new Error(`${transition}_withdrawal: ${error.message}`);
+
+  const r = result as { ok?: boolean; reason?: string; state?: string; changed?: boolean } | null;
+  if (r?.ok === false) {
+    // A deterministic refusal — unknown order, or a transition that is not
+    // legal from where this withdrawal already is. Retrying cannot help, and
+    // the refusal IS the state machine working.
+    console.error(
+      `[ccpayment-webhook] withdrawal ${orderId} ${transition} refused: ` +
+        `${r.reason} (state=${r.state ?? "unknown"})`,
+    );
   } else {
-    console.log(`[ccpayment-webhook] withdrawal ${orderId}: ${action}`);
+    console.log(
+      `[ccpayment-webhook] withdrawal ${orderId} ${transition} -> ${r?.state} (changed=${r?.changed})`,
+    );
   }
 
   return ok();

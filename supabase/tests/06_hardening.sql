@@ -91,10 +91,20 @@ begin
   end;
 
   -- Hiding yourself is a real preference and still reachable.
-  if public.profile_set_visibility(true) is not true then
-    raise exception 'FAIL: profile_set_visibility did not take';
+  --
+  -- Through profile_set_privacy, NOT profile_set_visibility. 0013 added the
+  -- second name for the same one-column write, and 0014 dropped it again on
+  -- purpose: two granted functions writing hidden_from_public that disagreed
+  -- about null is a bug waiting to be chosen between. This assertion was
+  -- written against 0013 and kept calling the dropped name, so from 0014
+  -- onwards the test failed on `function does not exist` — before reaching
+  -- anything it was meant to check.
+  --
+  -- profile_set_privacy returns jsonb rather than the boolean the old one did.
+  if (public.profile_set_privacy(true) ->> 'hidden_from_public')::boolean is not true then
+    raise exception 'FAIL: profile_set_privacy did not take';
   end if;
-  perform public.profile_set_visibility(false);
+  perform public.profile_set_privacy(false);
 end $$;
 
 reset role;

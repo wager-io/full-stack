@@ -81,7 +81,13 @@ verify_jwt = false
 [functions.ccpayment-address]
 verify_jwt = true
 
-[functions.ccpayment-withdraw]
+# withdrawal-dispatch replaces ccpayment-withdraw (removed in 0019). The JWT is
+# load-bearing twice over: the function re-checks is_admin server-side, and it
+# runs approve_withdrawal under the ADMIN's own token rather than the service
+# role — the two-person rule above the threshold only means anything if the two
+# signatures belong to two different people, and service role would make every
+# approval anonymous and identical.
+[functions.withdrawal-dispatch]
 verify_jwt = true
 
 # tron-address is called by a signed-in player; the JWT is what says which

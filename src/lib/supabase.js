@@ -10,6 +10,14 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// createClient() throws 'supabaseUrl is required.' on an empty string, which
+// kills the bundle at import time and renders a blank page. Fall back to a
+// syntactically valid placeholder instead: the app boots, the UI renders, and
+// only the calls that actually hit the backend fail.
+// (It rejects an empty key the same way, so both need a non-empty stand-in.)
+const PLACEHOLDER_URL = 'http://127.0.0.1:54321';
+const PLACEHOLDER_KEY = 'missing-anon-key';
+
 if (!supabaseUrl || !supabaseAnonKey) {
   // Don't throw — let the app boot so the UI still renders during local setup.
   console.warn(
@@ -18,7 +26,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
+export const supabase = createClient(supabaseUrl || PLACEHOLDER_URL, supabaseAnonKey || PLACEHOLDER_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,

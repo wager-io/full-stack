@@ -291,3 +291,61 @@ export function getDepositRecord(recordId: string) {
 }
 
 export const appId = APP_ID;
+
+/** USDT-denominated price per unit, by coin id. */
+export function getCoinUSDTPrice(coinIds: number[]) {
+  return ccRequest<Record<string, string>>("getCoinUSDTPrice", { coinIds });
+}
+
+/**
+ * How many units of `coinId` are worth `usd` dollars.
+ *
+ * Priced here, against the gateway, at the moment of use — never carried in
+ * from the request that created the withdrawal. A client-supplied coin amount
+ * paired with a server-held USD amount is an open exchange rate, and the gap
+ * between the two is free money: `amount: 1000 coins, amountUSD: 0.01` empties
+ * a balance for a cent. The old Express controller carried a comment warning
+ * about exactly this and then trusted the client anyway.
+ *
+ * Returns null when no usable price comes back. The caller must treat that as
+ * "cannot price this withdrawal" and leave the funds held — never as 1:1.
+ *
+ * ccRequest THROWS on a bad response rather than returning a flag, so the
+ * try/catch below is the error path, not belt-and-braces. Swallowing it to
+ * null is deliberate: every caller has to handle "no price" anyway, and there
+ * is nothing a withdrawal can usefully do with the distinction between a
+ * refused price and an unreachable one — both mean do not send.
+ */
+export async function coinUnitsForUsd(coinId: number, usd: number): Promise<number | null> {
+  let prices: Record<string, string>;
+  try {
+    prices = await getCoinUSDTPrice([coinId]);
+  } catch (err) {
+    console.error(`[ccpayment] price lookup failed for coin ${coinId}:`, err);
+    return null;
+  }
+
+  const price = Number.parseFloat(String(prices?.[String(coinId)] ?? ""));
+  if (!Number.isFinite(price) || price <= 0) return null;
+
+  const units = usd / price;
+  return Number.isFinite(units) && units > 0 ? units : null;
+}
+
+/**
+ * The withdrawal record, by OUR orderId.
+ *
+ * Only the on-chain transaction id is really wanted from it — that is the
+ * thing a player can paste into an explorer — so every caller treats a failure
+ * here as "no hash yet" rather than an error worth stopping for.
+ */
+export function getWithdrawalRecord(orderId: string) {
+  return ccRequest<{
+    record?: {
+      orderId?: string;
+      recordId?: string;
+      txId?: string;
+      status?: string;
+    };
+  }>("getAppWithdrawRecord", { orderId });
+}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import api from '../../utils/api';
+import api from '../../lib/apiCompat';
+import { invoke } from '../../lib/realtime';
 import { toast } from 'sonner';
 import Loader from '../common/Loader';
 import { FaChevronDown, FaInfoCircle, FaExclamationTriangle } from 'react-icons/fa';
@@ -16,12 +17,46 @@ export default function WithdrawTab() {
   const [selectedCoin, setSelectedCoin] = useState(null);
   const [selectedNetwork, setSelectedNetwork] = useState(null);
   const [withdrawalAddress, setWithdrawalAddress] = useState('');
+  // USD, because that is what the balance is denominated in. The coin amount is
+  // derived, shown as an estimate, and priced for real on the server at send.
   const [amount, setAmount] = useState('');
+  const [coinPrice, setCoinPrice] = useState(null);
   const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
     fetchAvailableCoins();
   }, []);
+
+  // Refresh the display price whenever the coin changes. A failure here only
+  // costs the estimate — the withdrawal itself is priced server-side.
+  useEffect(() => {
+    let cancelled = false;
+    setCoinPrice(null);
+    if (!selectedCoin?.coinId) return undefined;
+
+    (async () => {
+      const res = await invoke('ccpayment-address', {
+        action: 'price',
+        coinId: selectedCoin.coinId,
+      });
+      if (!cancelled && res.code === 0 && res.data?.success) {
+        setCoinPrice(Number(res.data.data.price));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [selectedCoin]);
+
+  const usdAmount = Number.parseFloat(amount);
+  const estimatedCoins =
+    Number.isFinite(usdAmount) && coinPrice > 0 ? usdAmount / coinPrice : null;
+  // The gateway's minimum is quoted in coin units; the input is in dollars.
+  // Null — never false — when there is no price yet, so `minimumUsd ?? 0`
+  // downstream yields a number rather than a boolean in a `min` attribute.
+  const minimumUsd =
+    coinPrice > 0 && selectedNetwork?.minimumWithdrawAmount
+      ? Number(selectedNetwork.minimumWithdrawAmount) * coinPrice
+      : null;
 
   const fetchAvailableCoins = async () => {
     try {
@@ -90,17 +125,30 @@ export default function WithdrawTab() {
     }
 
     const withdrawAmount = parseFloat(amount);
-    const minAmount = parseFloat(selectedNetwork.minimumWithdrawAmount || 0);
-    
-    if (withdrawAmount < minAmount) {
-      toast.error(`Minimum withdrawal amount is ${minAmount} ${selectedCoin.symbol}`);
+
+    if (!Number.isFinite(withdrawAmount) || withdrawAmount <= 0) {
+      toast.error('Enter a valid amount');
+      return;
+    }
+    if (withdrawAmount > (balance ?? 0)) {
+      toast.error('Amount exceeds your available balance');
+      return;
+    }
+    // Advisory only — the server re-checks everything that matters. This is
+    // here so a doomed request fails in the form rather than in the queue.
+    if (minimumUsd && withdrawAmount < minimumUsd) {
+      toast.error(
+        `Minimum withdrawal is ${selectedNetwork.minimumWithdrawAmount} ` +
+        `${selectedCoin.symbol} (about $${minimumUsd.toFixed(2)})`
+      );
       return;
     }
 
     try {
       setSubmitting(true);
       const response = await api.post('/api/ccpayment/withdraw', {
-        amount: withdrawAmount,
+        amount: withdrawAmount,          // USD
+        currency: selectedCoin.symbol,
         coinId: selectedCoin.coinId,
         chain: selectedNetwork.chain,
         address: withdrawalAddress,
@@ -108,7 +156,7 @@ export default function WithdrawTab() {
       });
 
       if (response.data.success) {
-        toast.success('Withdrawal request submitted successfully');
+        toast.success('Withdrawal requested — it is now awaiting review');
         setWithdrawalAddress('');
         setAmount('');
         navigate("/transactions/withdraw")
@@ -192,43 +240,60 @@ export default function WithdrawTab() {
           />
         </div>
         
-        {/* Amount Input with Balance Display */}
+        {/* Amount Input with Balance Display. Denominated in USD: that is what
+            the balance holds, and what gets held while the request is reviewed. */}
         <div className="space-y-1">
           <div className="flex justify-between items-center">
-            <label className="text-xs text-gray-400">Amount</label>
+            <label className="text-xs text-gray-400">Amount (USD)</label>
             <div className="text-xs text-gray-400">
-              <span className="font-medium">Available:</span> ${balance?.toFixed(2) || '0.00'} USDT
+              <span className="font-medium">Available:</span> ${balance?.toFixed(2) || '0.00'}
             </div>
           </div>
           <input
             type="number"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            placeholder={`Enter ${selectedCoin?.symbol || 'crypto'} amount`}
-            min={selectedNetwork?.minimumWithdrawAmount || 0}
-            step="0.00001"
+            placeholder="Enter amount in USD"
+            min={minimumUsd ?? 0}
+            step="0.01"
             className="w-full p-2.5 bg-gray-800 border border-gray-700 rounded-md text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <div className="flex justify-between items-center text-xs">
+          <div className="flex justify-between items-center text-xs gap-2">
             <div className="text-gray-400">
               {selectedNetwork && (
                 <>
-                  <span className="font-medium">Min. withdrawal:</span>{' '}
+                  <span className="font-medium">Min:</span>{' '}
                   {selectedNetwork.minimumWithdrawAmount || '0'} {selectedCoin?.symbol}
+                  {minimumUsd ? ` (≈ $${minimumUsd.toFixed(2)})` : ''}
                 </>
               )}
             </div>
+            {/* An estimate, and labelled as one. The rate is fixed server-side
+                when the withdrawal is actually sent, which may be later. */}
+            {estimatedCoins !== null && (
+              <div className="text-gray-300 whitespace-nowrap">
+                ≈ {estimatedCoins.toFixed(8)} {selectedCoin?.symbol}
+              </div>
+            )}
           </div>
         </div>
-        
+
         {/* Submit Button */}
-        <button 
+        <button
           onClick={handleWithdraw}
           disabled={!selectedCoin || !selectedNetwork || !withdrawalAddress || !amount || submitting}
           className="w-full p-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
         >
-          {submitting ? 'Processing...' : `Withdraw ${selectedCoin?.symbol || 'Crypto'}`}
+          {submitting ? 'Processing...' : `Request ${selectedCoin?.symbol || 'Crypto'} Withdrawal`}
         </button>
+
+        {/* Withdrawals are reviewed before they are sent, and the balance is not
+            debited until they are approved. Saying so here avoids the support
+            ticket that otherwise follows every single request. */}
+        <p className="text-xs text-gray-400 text-center">
+          Withdrawals are reviewed before being sent. Your balance is not deducted
+          until the request is approved.
+        </p>
       </div>
       
       {/* Expandable info section */}
