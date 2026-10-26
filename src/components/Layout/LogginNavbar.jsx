@@ -3,6 +3,7 @@ import { AuthContext } from '../../context/AuthContext'; // Import AuthContext
 import { useSearchParams, useNavigate } from 'react-router-dom'; // Import useSearchParams
 import { toast } from 'sonner'; // Import toast from sonner
 import { useLocation } from 'react-router-dom'
+import NotificationBell from './NotificationBell';
 
 export default function LogginNavbar({ toggleChat }) {
   const { user, balance, logout, verifyCode, resendVerificationCode, updateUserDetails } = useContext(AuthContext); // Access user, logout, verifyCode, and updateUserDetails from AuthContext
@@ -220,17 +221,13 @@ const formattedBalance = formatBalance(balance);
           )}
         </div>
 
-        {/* Bell Icon */}
-        <button className="p-2 md:p-4 flex items-center text-white">
-          <svg
-            fill="currentColor"
-            viewBox="0 0 64 64"
-            className="svg-icon w-9 h-9 text-white"
-          >
-            <title></title>
-            <path d="M56 39.64V32c0-10.44-6.68-19.32-16-22.6V8c0-4.4-3.6-8-8-8s-8 3.6-8 8v1.4C14.68 12.68 8 21.56 8 32v7.56H0V48h64v-8.44zm-40 19.6c0 2.64 2.12 4.76 4.76 4.76H43.2c2.64 0 4.76-2.12 4.76-4.76V54H16z"></path>
-          </svg>
-        </button>
+        {/* Notifications. Was a bell that did nothing — every money transition
+            has been writing rows to public.notifications that nobody could
+            read. This is now the only place a player is told a withdrawal was
+            approved, sent, or returned. */}
+        <div className="p-2 md:p-4 flex items-center">
+          <NotificationBell />
+        </div>
 
         {/* Chat Icon */}
         <button onClick={toggleChat} className="p-2 md:p-4 hidden items-center text-white md:block">

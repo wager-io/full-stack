@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { format } from 'date-fns';
-import api from '../../utils/api';
+import api from '../../lib/apiCompat';
 import { toast } from 'sonner';
 import { AuthContext } from '../../context/AuthContext';
 import { FiCopy } from 'react-icons/fi';

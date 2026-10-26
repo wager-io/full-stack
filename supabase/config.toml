@@ -60,32 +60,13 @@ verify_enabled = true
 [edge_runtime]
 enabled = true
 
-# ---------------------------------------------------------------------------
-# CCPayment posts here as CCPayment, not as a logged-in user, so it carries no
-# Supabase JWT. Left at the default, the platform would reject every webhook
-# with a 401 before the function ran, and CCPayment would retry a delivery that
-# can never succeed.
-#
-# The endpoint is NOT unauthenticated as a result: it authenticates the caller
-# itself, by HMAC over the raw body (see _shared/ccpayment.ts), which is the
-# only check that actually proves CCPayment sent it. An anon-key JWT would
-# prove nothing here — that key ships in the browser bundle.
-# ---------------------------------------------------------------------------
-[functions.ccpayment-webhook]
-verify_jwt = false
-
-# These two are called BY the browser, by a signed-in player, so the JWT is
-# left on: it is the only thing that says which player is asking, and both
-# functions key their answer off it — the deposit address a player is given,
-# and the balance a withdrawal debits.
-[functions.ccpayment-address]
-verify_jwt = true
-
-[functions.ccpayment-withdraw]
-verify_jwt = true
-
 # tron-address is called by a signed-in player; the JWT is what says which
 # player gets which address, so it stays on.
+#
+# There is no withdrawal function. Withdrawals are approved and recorded
+# through RPCs the admin panel calls directly (0020): with the send done by
+# hand from the treasury wallet, there is no third-party API to hold a secret
+# for, and so nothing for an Edge Function to do.
 [functions.tron-address]
 verify_jwt = true
 
