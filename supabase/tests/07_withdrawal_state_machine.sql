@@ -69,7 +69,7 @@ begin
   -- 1. REQUESTED moves nothing.
   -- =========================================================================
   perform set_config('request.jwt.claim.sub', v_player::text, false);
-  v_res := public.request_withdrawal(500.00, 'TXyz000000000000000000000000000000', 'TRX', 'USDT');
+  v_res := public.request_withdrawal(500.00, 'TJYeasTPa6gpEEfYYDQrLaGsLNbyZPtH5P', 'TRX', 'USDT');
   v_order := v_res ->> 'order_id';
 
   select balance, clearing_balance into v_avail, v_clear
@@ -83,7 +83,7 @@ begin
   -- =========================================================================
   v_ok := false;
   begin
-    perform public.request_withdrawal(100.00, 'TXabc00000000000000000000000000000', 'TRX', 'USDT');
+    perform public.request_withdrawal(100.00, 'TQ5NMqJjW8yHtGMTBGSFbFrpQ9CqQxqRkT', 'TRX', 'USDT');
   exception when others then
     if sqlerrm not like '%withdrawal_already_pending%' then raise; end if;
     v_ok := true;
@@ -179,7 +179,7 @@ begin
   -- 7. Large withdrawal: two DISTINCT administrators.
   -- =========================================================================
   perform set_config('request.jwt.claim.sub', v_player::text, false);
-  v_res := public.request_withdrawal(15000.00, 'TXbig00000000000000000000000000000', 'TRX', 'USDT');
+  v_res := public.request_withdrawal(15000.00, 'TWd4WrZ9wn84f5x1hZhL4DHvk738ns5jwb', 'TRX', 'USDT');
   v_order2 := v_res ->> 'order_id';
 
   perform set_config('request.jwt.claim.sub', v_admin1::text, false);
@@ -247,7 +247,7 @@ begin
   -- 9. Rollback from REQUESTED: nothing was held, so nothing is returned.
   -- =========================================================================
   perform set_config('request.jwt.claim.sub', v_player::text, false);
-  v_res := public.request_withdrawal(100.00, 'TXnew00000000000000000000000000000', 'TRX', 'USDT');
+  v_res := public.request_withdrawal(100.00, 'TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7', 'TRX', 'USDT');
   v_order2 := v_res ->> 'order_id';
 
   perform public.rollback_withdrawal(v_order2, 'rejected at review');
@@ -263,7 +263,7 @@ begin
   -- =========================================================================
   v_ok := false;
   begin
-    perform public.request_withdrawal(999999.00, 'TXzzz00000000000000000000000000000', 'TRX', 'USDT');
+    perform public.request_withdrawal(999999.00, 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', 'TRX', 'USDT');
   exception when others then
     if sqlerrm not like '%insufficient_balance%' then raise; end if;
     v_ok := true;
@@ -286,12 +286,12 @@ end $$;
 
 
 -- =============================================================================
--- Deposits reach the ledger — from BOTH rails, and exactly once.
+-- Deposits reach the ledger, exactly once.
 --
--- 0017 does not rewrite either deposit function. It hangs a trigger off the
--- row each one writes, so the ledger records what already happened rather than
--- deciding it. These checks drive the tables directly, which is the same thing
--- the functions do and keeps the test independent of their signatures.
+-- 0017 does not rewrite tron_credit_deposit. It hangs a trigger off the row
+-- that function writes, so the ledger records what already happened rather
+-- than deciding it. These checks drive the table directly, which is the same
+-- thing the function does and keeps the test independent of its signature.
 -- =============================================================================
 do $$
 declare
@@ -359,46 +359,13 @@ begin
     raise exception 'FAIL: a REJECTED deposit reached the ledger (% entries)', v_n;
   end if;
 
-  -- --- CCPayment: still live for coins TRON does not carry -------------------
-  select balance from public.system_accounts where kind = 'EXTERNAL' into v_ext0;
-
-  insert into public.ccp_deposits
-    (record_id, user_id, coin, amount, coin_usd_price, amount_usd, status, credited_at)
-  values
-    ('rec-ccp-1', v_player, 'ETH', 0.05, 2000, 100.00, 'Success', now());
-
-  select count(*) into v_n from public.ledger_entries
-   where idempotency_key = 'deposit:ccp:rec-ccp-1';
-  if v_n <> 2 then
-    raise exception 'FAIL: a credited CCPayment deposit did not post a pair (% entries)', v_n;
-  end if;
-
-  select balance into v_ext from public.system_accounts where kind = 'EXTERNAL';
-  if v_ext <> v_ext0 - 100.00 then
-    raise exception 'FAIL: EXTERNAL did not fund the CCPayment deposit (% -> %)', v_ext0, v_ext;
-  end if;
-
-  -- An uncredited CCPayment row (held for review, or still Processing) posts
-  -- nothing — `credited_at` is the flag, not `status`.
-  insert into public.ccp_deposits
-    (record_id, user_id, coin, amount, coin_usd_price, amount_usd, status, is_risky)
-  values
-    ('rec-ccp-risky', v_player, 'ETH', 1, 2000, 2000.00, 'Success', true);
-
-  select count(*) into v_n from public.ledger_entries
-   where idempotency_key = 'deposit:ccp:rec-ccp-risky';
-  if v_n <> 0 then
-    raise exception 'FAIL: an uncredited deposit reached the ledger (% entries)', v_n;
-  end if;
-
   -- --- cleanup --------------------------------------------------------------
   delete from public.tron_deposits where user_id = v_player;
-  delete from public.ccp_deposits  where user_id = v_player;
-  delete from public.ledger_entries
+    delete from public.ledger_entries
    where account_user_id = v_player or counterparty_user_id = v_player;
   delete from auth.users where id = v_player;
 
-  raise notice 'PASS — both deposit rails post to the ledger once, refused deposits post nothing';
+  raise notice 'PASS — TRON deposits post to the ledger once; refused deposits post nothing';
 end $$;
 
 

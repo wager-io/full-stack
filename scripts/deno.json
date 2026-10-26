@@ -1,0 +1,4 @@
+{
+  "_comment": "Scoped to scripts/ on purpose. The Supabase CLI bundles the Edge Functions with its own resolution; a deno.json at the repo root would change that for every function. Here it only lets a local script import from supabase/functions/_shared and pull the npm packages those files use.",
+  "nodeModulesDir": "auto"
+}

@@ -51,30 +51,29 @@ const api = {
   deleteData: (url) => dispatch('DELETE', url),
 };
 
-// --- payments: deposits & withdrawals --------------------------------------
+// --- payments: TRON deposits, manual withdrawals ---------------------------
 //
-// The first endpoints migrated off the dead Express backend. Each one keeps the
-// exact response SHAPE the old controllers returned — `{ success, data }`, with
-// camelCase rows — so the existing call sites in DepositTab, WithdrawTab and
-// the two transaction history pages did not have to be rewritten around a new
-// contract.
+// One asset, one chain: USDT on TRC-20. The currency/network pickers these
+// paths used to feed are gone from the UI, because offering a choice of one is
+// a decision the player cannot get right or wrong.
 //
-// Anything touching money goes through an RPC or an Edge Function. None of
-// these tables accept a client write: the browser holds the anon key, and the
-// INSERT/UPDATE policies to let it write a deposit or a withdrawal row
-// deliberately do not exist.
+// The legacy `/api/ccpayment/...` paths are kept as the KEYS only. They are
+// what the existing call sites ask for, and renaming them would be a rename
+// for its own sake — nothing behind them touches CCPayment any more.
+//
+// Nothing here moves money. Deposits are credited by the on-chain watcher;
+// withdrawals are recorded as a request and wait for an administrator.
 
 /** Postgres withdrawal row -> the shape the history page renders. */
 function toWithdrawalRow(w) {
   return {
     _id: w.order_id,
     orderId: w.order_id,
-    recordId: w.record_id,
     txId: w.tx_hash,
-    amount: Number(w.coin_amount ?? w.amount),
+    amount: Number(w.amount),
     amountUSD: Number(w.amount),
-    currency: w.currency,
-    chain: w.chain,
+    currency: w.currency ?? 'USDT',
+    chain: w.chain ?? 'TRC20',
     address: w.address,
     // `state` is the real position in the state machine; `status` is the
     // coarse projection the existing UI already knows how to colour.
@@ -85,71 +84,79 @@ function toWithdrawalRow(w) {
   };
 }
 
-/** Postgres deposit row -> the shape the history page renders. */
+/** Postgres tron_deposits row -> the shape the history page renders. */
 function toDepositRow(d) {
   return {
-    _id: d.record_id,
-    orderId: d.record_id,
-    recordId: d.record_id,
+    _id: d.tx_hash,
+    orderId: d.tx_hash,
+    txId: d.tx_hash,
     amount: Number(d.amount),
-    amountUSD: Number(d.amount_usd),
-    currency: d.currency,
-    chain: d.chain,
-    status: d.status,
-    flaggedRisky: d.flagged_risky,
+    amountUSD: Number(d.credited_usd ?? 0),
+    currency: 'USDT',
+    chain: 'TRC20',
+    // credited_at is the flag, not a status column: a row without it was seen
+    // and refused (wrong contract, too few confirmations, under a cent) and
+    // `rejected_reason` says which.
+    status: d.credited_at ? 'completed' : (d.rejected_reason ? 'failed' : 'pending'),
+    rejectedReason: d.rejected_reason,
     createdAt: d.created_at,
     metadata: d.raw ?? {},
   };
 }
 
-/** Unwrap an Edge Function result into the `{ success, ... }` body it returned. */
-function unwrap(res, fallbackMessage) {
-  if (res.code !== 0) return { success: false, message: res.message ?? fallbackMessage };
-  return res.data ?? { success: false, message: fallbackMessage };
-}
+// The player's permanent TRC-20 deposit address. Derived server-side from the
+// account xpub against the VERIFIED user id — there is no parameter here, and
+// deliberately so: an address is issued to whoever the JWT says you are.
+register('POST', /^\/api\/ccpayment\/permanent-address$/, async () => {
+  const res = await invoke('tron-address', {});
+  if (res.code !== 0) {
+    return { success: false, message: res.message ?? 'Could not get a deposit address' };
+  }
+  const d = res.data ?? {};
+  if (d.error) {
+    return {
+      success: false,
+      message: d.error === 'deposits_not_provisioned'
+        ? 'Deposits are not configured yet. Please contact support.'
+        : d.error,
+    };
+  }
+  // `contract` comes back so the UI can warn which token is accepted: USDT on
+  // TRC-20 and nothing else, because anything else sent here is unrecoverable.
+  return { success: true, data: { address: d.address, network: d.network, contract: d.contract } };
+});
 
-register('GET', /^\/api\/ccpayment\/currencies$/, async () =>
-  unwrap(await invoke('ccpayment-address', { action: 'coins' }), 'Failed to fetch coin list'),
-);
-
-register('POST', /^\/api\/ccpayment\/permanent-address$/, async (_params, body) =>
-  unwrap(
-    await invoke('ccpayment-address', { action: 'address', chain: body?.chain }),
-    'Failed to get deposit address',
-  ),
-);
-
-// Creates a REQUESTED withdrawal. Note what this does NOT do: it does not debit
-// the balance and it does not reach the gateway. Both wait for an administrator
-// to approve, which is the whole point of the change — a request is a claim,
-// not a movement.
+// Creates a REQUESTED withdrawal. Note what this does NOT do: it does not
+// debit the balance and it does not send anything. Both wait for an
+// administrator — a request is a claim, not a movement.
 //
-// `amount` is USD, because the balance being withdrawn from is USD. The number
-// of coins that buys is NOT sent and would not be trusted if it were:
-// withdrawal-dispatch prices it against the gateway when it actually sends.
+// `amount` is USD, because the balance is USD and USDT tracks it 1:1. No coin
+// amount is sent and none would be trusted: a client-supplied valuation
+// alongside a server-held one is an open exchange rate.
 register('POST', /^\/api\/ccpayment\/withdraw$/, async (_params, body) => {
   const res = await rpc('request_withdrawal', {
     p_amount: Number(body?.amount),
     p_address: body?.address,
-    p_chain: body?.chain,
-    p_currency: body?.currency ?? 'USDT',
-    p_memo: body?.memo ?? null,
-    p_coin_id: body?.coinId ?? null,
+    p_chain: 'TRC20',
+    p_currency: 'USDT',
+    p_memo: null,
+    p_coin_id: null,
     p_coin_amount: null,
   });
 
   if (res.code !== 0) {
-    // Postgres raises bare error codes ('insufficient_balance'); turn the ones
-    // a player can actually hit into something worth reading.
+    // Postgres raises bare codes ('insufficient_balance'); turn the ones a
+    // player can actually hit into something worth reading.
     const raw = res.message ?? '';
     const known = {
       insufficient_balance: 'You do not have enough balance for this withdrawal.',
       withdrawal_already_pending: 'You already have a withdrawal in progress.',
       withdrawals_disabled: 'Withdrawals are disabled on your account. Contact support.',
       account_not_active: 'Your account is not active.',
-      invalid_amount: 'Enter a valid amount.',
       invalid_amount_precision: 'Amount cannot be smaller than one cent.',
+      invalid_amount: 'Enter a valid amount.',
       missing_address: 'Enter a withdrawal address.',
+      withdrawals_tron_address_shape: 'That does not look like a TRON (TRC-20) address.',
       not_authenticated: 'Please sign in again.',
     };
     const key = Object.keys(known).find((k) => raw.includes(k));
@@ -170,7 +177,7 @@ register('GET', /^\/api\/ccpayment\/withdraw\/history$/, async () => {
   // no way to ask for somebody else's.
   const { data, error } = await supabase
     .from('withdrawals')
-    .select('order_id, record_id, tx_hash, amount, coin_amount, currency, chain, address, state, status, created_at, raw')
+    .select('order_id, tx_hash, amount, currency, chain, address, state, status, created_at, raw')
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -180,8 +187,8 @@ register('GET', /^\/api\/ccpayment\/withdraw\/history$/, async () => {
 
 register('GET', /^\/api\/ccpayment\/deposit\/history$/, async () => {
   const { data, error } = await supabase
-    .from('deposits')
-    .select('record_id, amount, amount_usd, currency, chain, status, flagged_risky, created_at, raw')
+    .from('tron_deposits')
+    .select('tx_hash, amount, credited_usd, credited_at, rejected_reason, created_at, raw')
     .order('created_at', { ascending: false })
     .limit(100);
 

@@ -52,7 +52,7 @@ begin
   -- A small withdrawal, start to finish.
   -- =========================================================================
   perform set_config('request.jwt.claim.sub', v_player::text, false);
-  v_res   := public.request_withdrawal(500.00, 'TXwalkthrough000000000000000000000', 'TRX', 'USDT');
+  v_res   := public.request_withdrawal(500.00, 'TJYeasTPa6gpEEfYYDQrLaGsLNbyZPtH5P', 'TRX', 'USDT');
   v_small := v_res ->> 'order_id';
   raise notice 'small withdrawal % requested — balance NOT yet touched', v_small;
 
@@ -70,7 +70,7 @@ begin
   -- A large one, to show the two-person rule refusing a single signature.
   -- =========================================================================
   perform set_config('request.jwt.claim.sub', v_player::text, false);
-  v_res   := public.request_withdrawal(15000.00, 'TXwalkthroughbig000000000000000000', 'TRX', 'USDT');
+  v_res   := public.request_withdrawal(15000.00, 'TWd4WrZ9wn84f5x1hZhL4DHvk738ns5jwb', 'TRX', 'USDT');
   v_large := v_res ->> 'order_id';
 
   perform set_config('request.jwt.claim.sub', v_admin1::text, false);

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Check, Close, Refresh, ContentCopy } from '@mui/icons-material';
+import { Search, Check, Close, Refresh, ContentCopy, Send, DoneAll } from '@mui/icons-material';
 import { toast } from 'sonner';
 import { supabase } from '../../../lib/supabase';
-import { rpc, invoke } from '../../../lib/realtime';
+import { rpc } from '../../../lib/realtime';
 
 /**
  * The withdrawal review queue.
@@ -11,9 +11,16 @@ import { rpc, invoke } from '../../../lib/realtime';
  * everything waiting on a human, oldest first. The HISTORY is the record:
  * what already settled, newest first.
  *
- * APPROVED rows stay in the queue even though nobody needs to approve them
- * again. Their funds are held but not yet sent, and dropping them at approval
- * would hide money that is mid-flight from the only screen watching it.
+ * APPROVED and BROADCASTING rows stay in the queue even though nobody needs
+ * to approve them again. Withdrawals are sent BY HAND from the treasury
+ * wallet, so each is still waiting on a person: APPROVED needs sending,
+ * BROADCASTING needs confirming. Nothing else will do it — there is no
+ * gateway webhook to finish the job.
+ *
+ * The three states map to one action each:
+ *   REQUESTED     approve (holds the funds) or reject
+ *   APPROVED      send the USDT, then record the hash
+ *   BROADCASTING  confirm it landed — settles the hold, writes the ledger
  *
  * Nothing here is the control. The server refuses a single approval on a large
  * withdrawal whatever this component renders, and it decides the threshold —
@@ -85,15 +92,25 @@ export default function WithdrawalsTable() {
 
   useEffect(() => { load(); }, [load]);
 
-  const act = async (orderId, body, successMessage) => {
+  // Straight to the RPCs. There is no Edge Function in this path any more:
+  // with the send done by hand there is no third-party API to hold a secret
+  // for, so nothing needed to sit between the panel and the database.
+  //
+  // Every one of these is SECURITY DEFINER and re-checks is_admin() in its own
+  // body. This component is a convenience, never the control.
+  const act = async (orderId, fn, args, successMessage) => {
     setBusy((b) => ({ ...b, [orderId]: true }));
     try {
-      const res = await invoke('withdrawal-dispatch', { order_id: orderId, ...body });
+      const res = await rpc(fn, { p_order_id: orderId, ...args });
 
-      if (res.code !== 0 || res.data?.success === false) {
-        toast.error(res.data?.message ?? res.message ?? 'Action failed');
-        // Reload anyway: a failed dispatch may still have moved the row — a
-        // gateway refusal rolls it back, and the screen should show that.
+      if (res.code !== 0) {
+        toast.error(res.message ?? 'Action failed');
+        return;
+      }
+      // The transition RPCs report a refusal in the payload rather than
+      // raising — an illegal transition is an answer, not an error.
+      if (res.data?.ok === false) {
+        toast.error(`Refused: ${res.data.reason}${res.data.state ? ` (state ${res.data.state})` : ''}`);
         await load();
         return;
       }
@@ -117,23 +134,47 @@ export default function WithdrawalsTable() {
       if (!ok) return;
     }
 
-    act(row.order_id, { action: 'approve' }, (data) =>
-      data?.dispatched
-        ? `Approved and sent — $${money(row.amount)}`
-        : `Approval recorded (${data?.approvals ?? 0} of ${data?.required ?? row.required})`
+    act(row.order_id, 'approve_withdrawal', {}, (d) =>
+      d?.held
+        ? `Approved — $${money(row.amount)} is now held. Send it, then record the hash.`
+        : `Approval recorded (${d?.approvals ?? 0} of ${d?.required ?? row.required})`
     );
   };
 
   const reject = (row) => {
     const reason = window.prompt(`Reject the $${money(row.amount)} withdrawal. Reason:`);
     if (reason === null) return;   // cancelled — not the same as an empty reason
-    act(row.order_id, { action: 'reject', reason }, () => 'Withdrawal returned to the player');
+    act(row.order_id, 'reject_withdrawal', { p_reason: reason },
+      () => 'Withdrawal returned to the player');
   };
 
-  // For an APPROVED row whose dispatch did not complete — the gateway was
-  // unreachable, or the submission succeeded but the state write did not.
-  const retry = (row) =>
-    act(row.order_id, { action: 'dispatch' }, () => 'Dispatch retried');
+  // APPROVED -> BROADCASTING. The operator has sent the USDT from the treasury
+  // wallet by hand; this records the transaction that proves it.
+  const markSent = (row) => {
+    const hash = window.prompt(
+      `You are recording that $${money(row.amount)} has been SENT to:\n\n${row.address}\n\n` +
+      `Paste the TRON transaction hash (64 hex characters):`
+    );
+    if (hash === null) return;
+    if (!hash.trim()) {
+      toast.error('A transaction hash is required');
+      return;
+    }
+    act(row.order_id, 'admin_mark_withdrawal_sent', { p_tx_hash: hash.trim() },
+      () => 'Recorded as sent — confirm it once it has network confirmations');
+  };
+
+  // BROADCASTING -> CONFIRMED. The step that drains the hold and writes the
+  // ledger entry, so it is deliberately separate from recording the send:
+  // this is the platform's books saying the money is gone.
+  const confirmSent = (row) => {
+    const ok = window.confirm(
+      `Confirm $${money(row.amount)} has landed on chain?\n\n` +
+      `This drains the held balance and writes the ledger entry. It cannot be undone.`
+    );
+    if (!ok) return;
+    act(row.order_id, 'admin_confirm_withdrawal', {}, () => 'Withdrawal confirmed and settled');
+  };
 
   const copy = (text) => {
     navigator.clipboard.writeText(text)
@@ -155,6 +196,9 @@ export default function WithdrawalsTable() {
   const heldTotal = queue
     .filter((r) => r.state === 'APPROVED')
     .reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
+  const sentTotal = queue
+    .filter((r) => r.state === 'BROADCASTING')
+    .reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
   const pendingTotal = queue
     .filter((r) => r.state === 'REQUESTED')
     .reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
@@ -170,8 +214,10 @@ export default function WithdrawalsTable() {
       <div className="flex flex-wrap gap-4 mb-6">
         <SummaryCard label="Awaiting review" value={`$${money(pendingTotal)}`} accent="#f59e0b"
           hint={`${queue.filter((r) => r.state === 'REQUESTED').length} request(s) — balance not yet held`} />
-        <SummaryCard label="Held in clearing" value={`$${money(heldTotal)}`} accent="#3b82f6"
-          hint={`${queue.filter((r) => r.state === 'APPROVED').length} approved — funds held, awaiting send`} />
+        <SummaryCard label="Approved — send these" value={`${money(heldTotal)}`} accent="#3b82f6"
+          hint={`${queue.filter((r) => r.state === 'APPROVED').length} held in clearing, waiting to be sent by hand`} />
+        <SummaryCard label="Sent — confirm these" value={`${money(sentTotal)}`} accent="#8b5cf6"
+          hint={`${queue.filter((r) => r.state === 'BROADCASTING').length} on chain, still held until confirmed`} />
       </div>
 
       {/* Search + refresh */}
@@ -274,6 +320,28 @@ export default function WithdrawalsTable() {
                     <div className="text-xs mt-1" style={{ color: 'var(--text-dark)' }}>
                       {truncate(row.order_id, 8, 6)}
                     </div>
+                    {/* The transaction an operator is about to confirm. Shown,
+                        copyable and linked, because "did this actually land?"
+                        is a question only the chain can answer — and confirming
+                        without checking is how a withdrawal gets settled twice
+                        on the books and once in reality. */}
+                    {row.tx_hash && (
+                      <div className="text-xs mt-1 flex items-center gap-1" style={{ color: '#8b5cf6' }}>
+                        <a
+                          href={`https://tronscan.org/#/transaction/${row.tx_hash}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                          title={row.tx_hash}
+                        >
+                          {truncate(row.tx_hash, 8, 6)}
+                        </a>
+                        <button onClick={() => copy(row.tx_hash)}
+                          className="opacity-60 hover:opacity-100" title="Copy transaction hash">
+                          <ContentCopy style={{ fontSize: '12px' }} />
+                        </button>
+                      </div>
+                    )}
                   </td>
 
                   <td className="py-4 px-4 text-sm" style={{ color: 'var(--text-dark)' }}>
@@ -301,23 +369,39 @@ export default function WithdrawalsTable() {
                   </td>
 
                   <td className="py-4 px-4">
+                    {/* One action per state, because each state has exactly
+                        one thing a person should do next. Reject stays
+                        available until the money has actually gone. */}
                     <div className="flex items-center justify-center gap-2">
-                      {row.state === 'REQUESTED' ? (
-                        <>
-                          <ActionButton onClick={() => approve(row)} disabled={busy[row.order_id]}
-                            accent="#22c55e" title="Approve" icon={Check} />
-                          <ActionButton onClick={() => reject(row)} disabled={busy[row.order_id]}
-                            accent="#ef4444" title="Reject and return the funds" icon={Close} />
-                        </>
-                      ) : (
-                        <>
-                          {/* APPROVED: funds are held. It either needs sending
-                              again, or returning. */}
-                          <ActionButton onClick={() => retry(row)} disabled={busy[row.order_id]}
-                            accent="#3b82f6" title="Retry sending to the gateway" icon={Refresh} />
-                          <ActionButton onClick={() => reject(row)} disabled={busy[row.order_id]}
-                            accent="#ef4444" title="Cancel and return the funds" icon={Close} />
-                        </>
+                      {row.state === 'REQUESTED' && (
+                        <ActionButton onClick={() => approve(row)} disabled={busy[row.order_id]}
+                          accent="#22c55e" title="Approve — holds the funds" icon={Check} />
+                      )}
+
+                      {row.state === 'APPROVED' && (
+                        <ActionButton onClick={() => markSent(row)} disabled={busy[row.order_id]}
+                          accent="#3b82f6"
+                          title="I have sent the USDT — record the transaction hash"
+                          icon={Send} />
+                      )}
+
+                      {row.state === 'BROADCASTING' && (
+                        <ActionButton onClick={() => confirmSent(row)} disabled={busy[row.order_id]}
+                          accent="#22c55e"
+                          title="Confirm it landed — settles the hold and writes the ledger"
+                          icon={DoneAll} />
+                      )}
+
+                      {/* Not offered once BROADCASTING: the USDT is already
+                          gone from the treasury wallet, so "return the funds"
+                          would credit a player who has also been paid. */}
+                      {row.state !== 'BROADCASTING' && (
+                        <ActionButton onClick={() => reject(row)} disabled={busy[row.order_id]}
+                          accent="#ef4444"
+                          title={row.state === 'REQUESTED'
+                            ? 'Reject the request'
+                            : 'Cancel and return the held funds'}
+                          icon={Close} />
                       )}
                     </div>
                   </td>
