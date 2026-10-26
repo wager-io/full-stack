@@ -154,7 +154,7 @@ function Sidebar({ isOpen, toggleSidebar, setOpenLiveSupport, openLiveSupport, i
   return (
     <>
       <aside
-        className={`bg-[#0f212e] sidebar pb-12 shadow-lg transition-all h-screen duration-300 ease-in-out fixed left-0 pt-0 ${
+        className={`site-sidebar bg-[#0f212e] sidebar pb-12 shadow-lg transition-all h-screen duration-300 ease-in-out fixed left-0 pt-0 ${
           isMobile 
             ? (isOpen 
                 ? 'w-full z-50' 
