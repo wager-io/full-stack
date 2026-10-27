@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import api from '../../lib/apiCompat';
+import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
 import Loader from '../common/Loader';
 import QRCode from 'react-qr-code';
@@ -28,11 +28,26 @@ export default function DepositTab() {
     try {
       setLoading(true);
       setError('');
-      const res = await api.post('/api/ccpayment/permanent-address', {});
-      if (res.data.success && res.data.data?.address) {
-        setDeposit(res.data.data);
+      const { data, error: invokeError } = await supabase.functions.invoke('tron-address', { body: {} });
+      if (invokeError) {
+        let message = 'Could not generate a deposit address';
+        if (invokeError.context instanceof Response) {
+          try {
+            const body = await invokeError.context.clone().json();
+            if (body?.error === 'deposits_not_provisioned') {
+              message = 'Deposits are not configured yet. Please contact support.';
+            }
+          } catch (parseErr) {
+            console.error('Error reading tron-address response:', parseErr);
+          }
+        }
+        console.error('Error fetching deposit address:', invokeError);
+        setError(message);
+        setDeposit(null);
+      } else if (data?.address) {
+        setDeposit(data);   // { address, network, contract }
       } else {
-        setError(res.data.message || 'Could not generate a deposit address');
+        setError(data?.error || 'Could not generate a deposit address');
         setDeposit(null);
       }
     } catch (err) {

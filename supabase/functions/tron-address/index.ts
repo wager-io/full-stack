@@ -21,6 +21,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { tronAddressFromXpub } from "../_shared/tron.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -37,9 +38,13 @@ const XPUB = Deno.env.get("TRON_ACCOUNT_XPUB") ?? "";
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
 const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
   if (!XPUB) {

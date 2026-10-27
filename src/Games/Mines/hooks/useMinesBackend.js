@@ -36,6 +36,20 @@ export default function useMinesBackend({ user, balance, setBalance, gameState, 
     }
   }, [])
 
+  const toHistoryEntry = useCallback((cs) => {
+    const betAmount = Number(cs.bet_amount)
+    const payout = cs.state === 'lost' ? 0 : Number(cs.potential_payout)
+    return {
+      player: user?.user_metadata?.username || user?.email?.split('@')[0] || 'You',
+      betAmount,
+      minesCount: Number(cs.mines_count),
+      revealedCount: Number(cs.revealed_count),
+      multiplier: cs.state === 'lost' ? 0 : Number(cs.current_multiplier),
+      profit: payout - betAmount,
+      createdAt: new Date().toISOString(),
+    }
+  }, [user])
+
   // Restore an in-progress round after a refresh / reconnect.
   useEffect(() => {
     let cancelled = false
@@ -67,21 +81,21 @@ export default function useMinesBackend({ user, balance, setBalance, gameState, 
         setBalance(balance + Number(res.data.potential_payout))
       }
       if (res.data.state !== 'active') {
-        setGameHistory((h) => [{ ...res.data }, ...h].slice(0, 20))
+        setGameHistory((h) => [toHistoryEntry(res.data), ...h].slice(0, 20))
       }
     }
     return res
-  }, [gameState.gameId, applyState, setGameState, balance, setBalance, setGameHistory])
+  }, [gameState.gameId, applyState, setGameState, balance, setBalance, setGameHistory, toHistoryEntry])
 
   const handleCashout = useCallback(async () => {
     const res = await rpc('mines_cashout', { p_game_id: gameState.gameId })
     if (res.code === 0) {
       setGameState((prev) => applyState(res.data, prev))
       if (typeof balance === 'number') setBalance(balance + Number(res.data.potential_payout))
-      setGameHistory((h) => [{ ...res.data }, ...h].slice(0, 20))
+      setGameHistory((h) => [toHistoryEntry(res.data), ...h].slice(0, 20))
     }
     return res
-  }, [gameState.gameId, applyState, setGameState, balance, setBalance, setGameHistory])
+  }, [gameState.gameId, applyState, setGameState, balance, setBalance, setGameHistory, toHistoryEntry])
 
   return { socketRef, handleStartGame, handleRevealTile, handleCashout }
 }

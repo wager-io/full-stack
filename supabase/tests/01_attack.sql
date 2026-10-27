@@ -12,7 +12,8 @@
 create or replace function tap(label text, passed boolean)
 returns void language plpgsql as $$
 begin
-  raise notice '%  %', case when passed then 'PASS' else 'FAIL  <<<<<<' end, label;
+  if not passed then raise exception 'FAIL: %', label; end if;
+  raise notice 'PASS  %', label;
 end $$;
 
 create or replace function as_user(u uuid) returns void language plpgsql as $$
@@ -119,11 +120,13 @@ do $$ declare denied boolean := false; begin
   perform tap('ATTACK calling trigger fn handle_new_user() is DENIED', denied);
 end $$;
 
--- Legitimate action still works.
+-- Profile changes go through the validated RPC, not direct table writes.
 do $$ declare ok boolean := false; begin
-  begin update public.profiles set username = 'renamed' where id = auth.uid(); ok := true;
+  begin
+    perform public.profile_set_details('{"firstName":"Updated"}'::jsonb);
+    select first_name = 'Updated' into ok from public.profiles where id = auth.uid();
   exception when others then ok := false; end;
-  perform tap('user CAN still update own non-money fields', ok);
+  perform tap('user can update own profile through the validated RPC', ok);
 end $$;
 
 -- KNOWN ISSUE — public_profiles ignores hidden_from_public.
