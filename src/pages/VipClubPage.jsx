@@ -2,9 +2,66 @@ import React, { useContext, useState, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import VipCard from './landingPageComponent/VipCard';
 import { getAllVipTiers } from '../services/vipService';
+import { rpc } from '../lib/realtime';
+import { toast } from 'sonner';
 import { FaGift, FaHeadset, FaCalendarCheck } from 'react-icons/fa';
 import { GiReceiveMoney } from 'react-icons/gi';
 
+
+function RakebackCard() {
+  const [status, setStatus] = useState(null);
+  const [claiming, setClaiming] = useState(false);
+
+  const refresh = async () => {
+    const res = await rpc('rakeback_status');
+    if (res.code === 0) setStatus(res.data);
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const claim = async () => {
+    setClaiming(true);
+    const res = await rpc('rakeback_claim');
+    setClaiming(false);
+    if (res.code === 0) {
+      const row = Array.isArray(res.data) ? res.data[0] : res.data;
+      toast.success(`Claimed ${Number(row.amount).toFixed(2)} rakeback`);
+    } else {
+      toast.error(res.message === 'nothing_to_claim' ? 'Nothing to claim yet' : res.message);
+    }
+    refresh();
+  };
+
+  if (!status) return null;
+  const claimable = Number(status.claimable);
+
+  return (
+    <div className="w-full bg-[#213743] rounded-lg shadow-lg p-6 mt-8 flex flex-col sm:flex-row items-start sm:items-center justify-between">
+      <div className="flex-1">
+        <h2 className="text-2xl font-bold text-white mb-2">Rakeback</h2>
+        <p className="text-gray-300 text-sm">
+          {(Number(status.rate) * 100).toFixed(1)}% of house edge on every bet
+        </p>
+        {status.eligible ? (
+          <p className="text-white text-xl font-bold mt-2">{claimable.toFixed(2)} claimable</p>
+        ) : (
+          <p className="text-gray-400 text-sm mt-2">Unlocks at {status.min_tier}</p>
+        )}
+      </div>
+      {status.eligible && (
+        <button
+          onClick={claim}
+          disabled={claiming || claimable < 0.01}
+          className="bg-blue-600 text-white py-2 px-6 rounded shadow-lg hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-4 sm:mt-0"
+        >
+          Claim
+        </button>
+      )}
+    </div>
+  );
+}
 
 function VipClubPage() {
   const { user, userVipTier } = useContext(AuthContext);
@@ -259,6 +316,7 @@ function VipClubPage() {
 
       {/* VIP Ranking System Section */}
       <div className="container mx-auto px-4">
+        {user && <RakebackCard />}
         <div className="w-full mt-8 text-center">
           <h2 className="text-3xl font-bold text-white mb-8">
             WAGER VIP ranking system
