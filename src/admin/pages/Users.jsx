@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
+import { supabase } from '../../lib/supabase';
 import {
   Search,
   Visibility,
@@ -12,32 +14,64 @@ import {
   Block
 } from '@mui/icons-material';
 
-export default function Users() {
-  // Sample users data - in real app this would come from API
-  const [allUsers] = useState([
-    { userId: 'U001', username: 'CryptoKing', country: 'US', balance: 1200, gender: 'Male', status: 'Active', flag: '🇺🇸' },
-    { userId: 'U002', username: 'LuckyPlayer', country: 'UK', balance: 600, gender: 'Female', status: 'Active', flag: '🇬🇧' },
-    { userId: 'U003', username: 'BetMaster', country: 'CA', balance: 542, gender: 'Male', status: 'Inactive', flag: '🇨🇦' },
-    { userId: 'U004', username: 'WinnerX', country: 'AU', balance: 28750, gender: 'Female', status: 'Active', flag: '🇦🇺' },
-    { userId: 'U005', username: 'GamerPro', country: 'DE', balance: 25600, gender: 'Male', status: 'Disabled', flag: '🇩🇪' },
-    { userId: 'U006', username: 'SlotMaster', country: 'FR', balance: 23400, gender: 'Male', status: 'Active', flag: '🇫🇷' },
-    { userId: 'U007', username: 'PokerAce', country: 'JP', balance: 21800, gender: 'Female', status: 'Active', flag: '🇯🇵' },
-    { userId: 'U008', username: 'RoulettePro', country: 'IT', balance: 19500, gender: 'Male', status: 'Inactive', flag: '🇮🇹' },
-    { userId: 'U009', username: 'BlackjackKing', country: 'ES', balance: 18200, gender: 'Female', status: 'Active', flag: '🇪🇸' },
-    { userId: 'U010', username: 'CasinoLegend', country: 'BR', balance: 16900, gender: 'Male', status: 'Active', flag: '🇧🇷' },
-    { userId: 'U011', username: 'HighRoller', country: 'NL', balance: 15600, gender: 'Female', status: 'Disabled', flag: '🇳🇱' },
-    { userId: 'U012', username: 'VegasViper', country: 'SE', balance: 14300, gender: 'Male', status: 'Active', flag: '🇸🇪' },
-  ]);
+// profiles.status is lowercase and its third value is 'suspended', not
+// 'Disabled'. Mapped in one place so the filter, the badge and the icon cannot
+// drift apart — and so a status nobody has seen before shows as itself rather
+// than falling through to "Active".
+const STATUS_LABEL = { active: 'Active', inactive: 'Inactive', suspended: 'Disabled' };
+const toLabel = (s) => STATUS_LABEL[s] ?? (s ? s[0].toUpperCase() + s.slice(1) : 'Unknown');
 
+export default function Users() {
+  // This listed twelve invented players. Real rows come from `profiles`, which
+  // an admin may read under RLS (`id = auth.uid() OR is_admin()`), so there is
+  // no RPC in the way — a non-admin simply sees one row, their own.
+  const [allUsers, setAllUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('All');
-  const usersPerPage = 4;
+  const usersPerPage = 10;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, username, email, country, balance, clearing_balance, status, is_admin, current_level, created_at')
+      .order('balance', { ascending: false })
+      .limit(500);
+
+    if (error) {
+      toast.error(`Could not load users: ${error.message}`);
+      setAllUsers([]);
+    } else {
+      setAllUsers((data ?? []).map((u) => ({
+        userId: u.id,
+        username: u.username || '—',
+        email: u.email || '—',
+        country: u.country || '—',
+        balance: Number(u.balance ?? 0),
+        // Held against an approved withdrawal. Shown apart from the spendable
+        // balance: added together they would hide the only figure that says
+        // what is already committed to leaving.
+        held: Number(u.clearing_balance ?? 0),
+        status: toLabel(u.status),
+        isAdmin: u.is_admin,
+        level: u.current_level ?? 0,
+        joined: u.created_at,
+      })));
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   // Filter users based on search term and status
   const filteredUsers = allUsers.filter(user => {
-    const matchesSearch = user.userId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         user.username.toLowerCase().includes(searchTerm.toLowerCase());
+    const q = searchTerm.toLowerCase();
+    const matchesSearch = !q ||
+      user.userId.toLowerCase().includes(q) ||
+      user.username.toLowerCase().includes(q) ||
+      user.email.toLowerCase().includes(q);
     const matchesStatus = statusFilter === 'All' || user.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -92,11 +126,15 @@ export default function Users() {
         >
           Users Management
         </h1>
-        <p 
+        <p
           className="text-lg"
           style={{ color: 'var(--text-dark)' }}
         >
-          Manage and monitor all registered users
+          {/* An empty list is ambiguous while the query is still running —
+              "no users" and "not loaded yet" look identical otherwise. */}
+          {loading
+            ? 'Loading users…'
+            : `${allUsers.length} registered user${allUsers.length === 1 ? '' : 's'}`}
         </p>
       </div>
 
@@ -121,7 +159,7 @@ export default function Users() {
             </div>
             <input
               type="text"
-              placeholder="Search by User ID or Username..."
+              placeholder="Search by ID, username or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-3 rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -230,7 +268,7 @@ export default function Users() {
                   className="text-left py-4 px-6 text-sm font-semibold"
                   style={{ color: 'var(--text-light)' }}
                 >
-                  Gender
+                  Email
                 </th>
                 <th 
                   className="text-left py-4 px-6 text-sm font-semibold"
@@ -261,7 +299,7 @@ export default function Users() {
                       className="py-4 px-6 text-sm font-mono"
                       style={{ color: 'var(--accent-purple)' }}
                     >
-                      {user.userId}
+                      {user.userId.slice(0, 8)}…
                     </td>
                     <td 
                       className="py-4 px-6 text-sm font-medium"
@@ -282,13 +320,18 @@ export default function Users() {
                       className="py-4 px-6 text-sm font-bold"
                       style={{ color: 'var(--success-green)' }}
                     >
-                      ${user.balance.toLocaleString()}
+                      ${user.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {user.held > 0 && (
+                        <span className="block text-xs font-normal" style={{ color: '#3b82f6' }}>
+                          ${user.held.toLocaleString(undefined, { minimumFractionDigits: 2 })} held
+                        </span>
+                      )}
                     </td>
                     <td 
                       className="py-4 px-6 text-sm"
                       style={{ color: 'var(--text-light)' }}
                     >
-                      {user.gender}
+                      {user.email}
                     </td>
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-2">
