@@ -48,6 +48,10 @@ const ManualBetForm = () => {
       toast.error('Insufficient balance');
       return;
     }
+    if (Number(Number(betAmount).toFixed(2)) !== Number(betAmount)) {
+      toast.error('Bet amount can have at most 2 decimals');
+      return;
+    }
     // Check if cashout value is valid
     if (cashoutAt < 1.01) {
       toast.error('increase cashout value ');
@@ -65,6 +69,10 @@ const ManualBetForm = () => {
     }
     if (betAmount > balance) {
       toast.error('Insufficient balance');
+      return;
+    }
+    if (Number(Number(betAmount).toFixed(2)) !== Number(betAmount)) {
+      toast.error('Bet amount can have at most 2 decimals');
       return;
     }
     // Check if cashout value is valid

@@ -3,31 +3,12 @@ import { useCrashGame } from './CrashContext';
 import { observer } from 'mobx-react-lite';
 import CrashHistory from './components/Crash.history';
 import GameCanvas from './components/GameCanvas';
-import useSocketConnection from './hooks/useSocketConnection';
 import graphStore from './store/GraphStore';
 import { keyframes, css } from '@emotion/react';
 
 const CrashCanvas = observer(() => {
-  const { 
-    gameState, 
-    setGameState, // Make sure this is a function from your context
-    userBet, 
-    setUserBet, 
-    setBets, 
-    setHistory,
-    handleCashout
-  } = useCrashGame();
-  
-  // Make sure all these props are functions where expected
-  const socketRef = useSocketConnection({
-    setGameState,
-    setBets,
-    setHistory,
-    userBet,
-    setUserBet,
-    handleCashout
-  });
-
+  // State and the backend connection live in CrashContext; nothing to subscribe to here.
+  useCrashGame();
 
   const BlinkingIndicator = () => (
     <>

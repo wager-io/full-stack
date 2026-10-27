@@ -1,27 +1,20 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { io } from 'socket.io-client';
 import { toast } from 'sonner';
 import graphStore from '../store/GraphStore';
 import { GameStatus } from '../models/CrashGame';
-import { serverUrl } from "../../../utils/api";
+import { rpc } from '../../../lib/realtime';
+import { supabase } from '../../../lib/supabase';
 
-// Map status number to string
-export const mapStatusToString = (status) => {
-  switch (status) {
-    case 0: return 'waiting';
-    case 1: return 'starting';
-    case 2: return 'running';
-    case 3: return 'crashed';
-    default: return 'waiting';
-  }
-};
+// File name kept for import compatibility: this hook now talks to the Postgres
+// crash backend (crash_state / crash_bet / crash_cashout), not socket.io.
 
-// Create a singleton socket instance that persists across component mounts/unmounts
-let globalSocket = null;
+const POLL_MS = 1000;
+const TICK_MS = 50;
+
+const multiplierAt = (ms) => Math.floor(Math.exp(6e-5 * Math.max(0, ms)) * 100) / 100;
 
 export default function useSocketConnection({
   user,
-  balance,
   setBalance,
   gameState,
   setGameState,
@@ -30,75 +23,220 @@ export default function useSocketConnection({
   userBet,
   setUserBet
 }) {
-  const socketRef = useRef(null);
-  // Use a ref to track if we've already processed initial data
-  const initialDataProcessedRef = useRef(false);
+  const socketRef = useRef(null); // kept for interface compatibility; unused
 
-  // Callback for placing a bet
-  const handlePlaceBet = useCallback((amount, autoCashout) => {
-    // Check if user is logged in
+  const offsetRef = useRef(0);               // serverMs - clientMs
+  const bestRttRef = useRef(Infinity);
+  const inFlightRef = useRef(false);
+  const snapRef = useRef(null);              // last crash_state response
+  const appliedRef = useRef({ key: null, roundId: null });
+  const settledSeenRef = useRef(new Set());  // bet_ids already seen settled (balance synced once)
+  const sigRef = useRef({ bets: '', history: '' });
+  const errorShownRef = useRef(false);
+  const refetchRef = useRef(() => {});
+
+  // Balance is set absolutely by AuthContext's realtime profiles subscription, so
+  // never apply deltas here: re-read the server value instead.
+  const syncBalance = useCallback(async () => {
+    if (!user?.id) return;
+    const { data } = await supabase.from('profiles').select('balance').eq('id', user.id).single();
+    if (data && data.balance != null) setBalance(Number(data.balance));
+  }, [user?.id, setBalance]);
+  const syncBalanceRef = useRef(syncBalance);
+  syncBalanceRef.current = syncBalance;
+
+  // Derive status/multiplier from the last snapshot and the synced clock, then push to state + graph.
+  const applyDerived = useCallback(() => {
+    const snap = snapRef.current;
+    if (!snap) return;
+    const round = snap.round;
+    const offset = offsetRef.current;
+    const prev = appliedRef.current;
+
+    let status = 'waiting';
+    let multiplier = 1;
+    let timeLeft = 0;
+    let crashPoint = 0;
+    let hash = '';
+    let startClient = null;
+
+    if (round) {
+      const beaMs = Date.parse(round.betting_ends_at);
+      const serverNow = Date.now() + offset;
+      startClient = beaMs - offset;
+      if (round.phase === 'crashed') {
+        status = 'crashed';
+        crashPoint = Number(round.crash_point);
+        multiplier = crashPoint;
+        hash = round.hash || '';
+      } else if (round.phase === 'running' || serverNow >= beaMs) {
+        status = 'running';
+        multiplier = multiplierAt(serverNow - beaMs);
+      } else {
+        status = 'starting';
+        timeLeft = Math.round(Math.max(0, beaMs - serverNow) / 100) / 10;
+      }
+    }
+
+    const roundId = round ? round.id : 0;
+    const key = `${roundId}:${status}`;
+    const changed = key !== prev.key;
+    if (roundId !== prev.roundId) graphStore.resetEscapes();
+    appliedRef.current = { key, roundId };
+
+    setGameState((s) => {
+      if (
+        s.status === status && s.multiplier === multiplier && s.timeLeft === timeLeft &&
+        s.gameId === roundId && s.crashPoint === crashPoint && s.hash === hash
+      ) return s;
+      return { ...s, status, multiplier, timeLeft, crashPoint, gameId: roundId, hash };
+    });
+
+    if (startClient != null) graphStore.setStartTime(startClient);
+    if (status === 'running') graphStore.updateGameRate(multiplier);
+
+    if (changed) {
+      if (status === 'waiting') {
+        graphStore.updateGameStatus(GameStatus.CONNECTION);
+        graphStore.setGameStateMessage('Crash is starting up');
+      } else {
+        graphStore.clearMessages();
+        if (status === 'starting') graphStore.updateGameStatus(GameStatus.STARTING);
+        else if (status === 'running') graphStore.updateGameStatus(GameStatus.PROGRESS);
+        else {
+          graphStore.updateGameRate(crashPoint);
+          graphStore.game.hash = hash;
+          graphStore.game.maxRate = crashPoint;
+          graphStore.updateGameStatus(GameStatus.ENDED);
+        }
+      }
+    }
+  }, [setGameState]);
+
+  const fetchState = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      const tSent = Date.now();
+      const res = await rpc('crash_state');
+      const tRecv = Date.now();
+      if (res.code !== 0 || !res.data) {
+        graphStore.setErrorMessage('Connection error', true);
+        errorShownRef.current = true;
+        return;
+      }
+      if (errorShownRef.current) {
+        errorShownRef.current = false;
+        graphStore.clearMessages();
+        appliedRef.current = { ...appliedRef.current, key: null }; // re-apply status message
+      }
+      const data = res.data;
+
+      // Clock sync: keep the offset from the smallest round trip seen
+      const rtt = tRecv - tSent;
+      if (rtt <= bestRttRef.current) {
+        bestRttRef.current = rtt;
+        offsetRef.current = Date.parse(data.server_now) - (tSent + tRecv) / 2;
+      }
+
+      snapRef.current = data;
+
+      // Bets list
+      const bets = (data.players || []).map((p) => ({
+        username: p.display_name || 'Hidden',
+        name: p.display_name || 'Hidden',
+        avatar: p.avatar_url || undefined,
+        amount: Number(p.amount),
+        cashoutMultiplier: p.cashout_multiplier != null ? Number(p.cashout_multiplier) : undefined,
+        status: p.state === 'cashed' ? 'cashed_out' : p.state === 'lost' ? 'lost' : 'active'
+      }));
+      const betsSig = JSON.stringify(bets);
+      if (betsSig !== sigRef.current.bets) {
+        sigRef.current.bets = betsSig;
+        setBets(bets);
+      }
+
+      // History: Crash.history reads oldest-first and reverses; server sends newest-first
+      const history = (data.history || []).map((h) => ({ id: h.id, crashPoint: Number(h.crash_point) })).reverse();
+      const histSig = history.map((h) => `${h.id}:${h.crashPoint}`).join(',');
+      if (histSig !== sigRef.current.history) {
+        sigRef.current.history = histSig;
+        setHistory(history);
+      }
+
+      // My bet; sync balance once when a bet is first seen settled
+      const mb = data.my_bet;
+      if (mb) {
+        if ((mb.state === 'cashed' || mb.state === 'lost') && !settledSeenRef.current.has(mb.bet_id)) {
+          settledSeenRef.current.add(mb.bet_id);
+          syncBalanceRef.current();
+        }
+        if (mb.state === 'active') {
+          setUserBet({
+            betId: mb.bet_id,
+            amount: Number(mb.amount),
+            autoCashout: mb.auto_cashout != null ? Number(mb.auto_cashout) : null
+          });
+        } else {
+          setUserBet(null);
+        }
+      } else {
+        setUserBet(null);
+      }
+      applyDerived();
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [applyDerived, setBets, setHistory, setUserBet]);
+  refetchRef.current = fetchState;
+
+  // Poll + realtime + local animation tick
+  useEffect(() => {
+    fetchState();
+    const poll = setInterval(fetchState, POLL_MS);
+    const tick = setInterval(applyDerived, TICK_MS);
+    const channel = supabase
+      .channel('crash_rounds_feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crash_rounds' }, () => fetchState())
+      .subscribe();
+    return () => {
+      clearInterval(poll);
+      clearInterval(tick);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchState, applyDerived]);
+
+  // Re-read my_bet when the logged-in user changes
+  useEffect(() => {
+    settledSeenRef.current = new Set();
+    refetchRef.current();
+  }, [user?.id]);
+
+  const handlePlaceBet = useCallback(async (amount, autoCashout) => {
     if (!user) {
       toast.error('Please log in to place a bet', {
         description: 'You need to be logged in to play games'
       });
       return;
     }
-
-    // // For non-zero bets, check if user has sufficient balance
-    // if (amount > 0 && amount > balance) {
-    //   toast.error('Insufficient balance', {
-    //     description: `Your balance: ${balance.toFixed(2)} USDT`
-    //   });
-    //   return;
-    // }
-
-    // Check if cashout value is valid
     if (autoCashout < 1.01) {
       toast.error('Invalid cashout value');
       return;
     }
 
-    // Check if socket is connected
-    if (!socketRef.current || !socketRef.current.connected) {
-      toast.error('Connection error');
+    const res = await rpc('crash_bet', { p_amount: amount, p_auto_cashout: autoCashout || null });
+    if (res.code !== 0) {
+      toast.error('Bet placement failed', {
+        description: res.message || 'Failed to place bet'
+      });
       return;
     }
+    syncBalance();
+    refetchRef.current();
+  }, [user, syncBalance]);
 
-    // Emit bet event to server
-    socketRef.current.emit('throw-bet', {
-      userId: user._id,
-      gameId: gameState.gameId,
-      bet: amount,
-      autoEscapeRate: autoCashout,
-      currencyName: 'USDT',
-      currencyImage: '/assets/token/usdt.png',
-      name: user.username || 'Player',
-      avatar: user.avatar || '/assets/avatars/default.png',
-      hidden: user.hiddenFromPublic || false
-    }, (response) => {
-      if (response.code !== 0) {
-        toast.error('Bet placement failed', {
-          description: response.message || 'Failed to place bet'
-        });
-      } else {
-        setUserBet({
-          amount,
-          autoCashout
-        });
-
-        // Update balance for non-zero bets
-        if (amount >= 0) {
-          setBalance(prevBalance => prevBalance - amount);
-        }
-      }
-    });
-  }, [user, balance, gameState?.gameId, setBalance, setUserBet]);
-
-  // Callback for cashing out
-  const handleCashout = useCallback(() => {
+  const handleCashout = useCallback(async () => {
     if (!userBet || gameState.status !== 'running') return;
-
-    // Check if user is logged in
     if (!user) {
       toast.error('Please log in to cash out', {
         description: 'You need to be logged in to play games'
@@ -106,365 +244,21 @@ export default function useSocketConnection({
       return;
     }
 
-    // Check if socket is connected
-    if (!socketRef.current || !socketRef.current.connected) {
-      toast.error('Connection error');
+    const res = await rpc('crash_cashout');
+    if (res.code !== 0) {
+      toast.error('Cashout failed', { description: res.message });
+      refetchRef.current();
       return;
     }
-
-    // Emit cashout event to server
-    socketRef.current.emit('throw-escape', {
-      userId: user._id,
-      gameId: gameState?.gameId
-    }, (response) => {
-      if (response.code !== 0) {
-        toast.error('Cashout failed')
-      } else {
-        // Only show toast for non-zero bets
-        if (userBet?.amount >= 0) {
-          const winAmount = userBet?.amount * gameState?.multiplier;
-          const profit = winAmount - userBet?.amount;
-
-          // Update balance
-          setBalance(prevBalance => prevBalance + winAmount);
-          setUserBet(null);
-        }
-      }
-    });
-  }, [user, userBet, gameState?.status, gameState?.gameId, gameState?.multiplier, setBalance]);
-
-  // Auto cashout effect
-  useEffect(() => {
-    if (userBet && userBet.autoCashout &&
-      gameState?.status === 'running' &&
-      gameState?.multiplier >= userBet?.autoCashout) {
-      handleCashout();
-    }
-  }, [userBet, gameState?.status, gameState?.multiplier, handleCashout]);
-
-  useEffect(() => {
-    const apiBaseUrl = serverUrl();
-    fetch(`${apiBaseUrl}/api/crash/history`)
-      .then(res => {
-        if (!res.ok) {
-          throw new Error(`HTTP error! Status: ${res.status}`);
-        }
-        return res.json();
-      })
-      .then(data => {
-        if (data.recent) {
-          setHistory(data.recent.map(game => ({
-            id: game.gameId,
-            crashPoint: game.crashedAt
-          })));
-        }
-      })
-      .catch(err => {
-        console.error("Failed to fetch crash history:", err);
-        graphStore.setErrorMessage("Failed to load game history");
-      });
-  }, [])
-
-  useEffect(() => {
-    // Connect to Socket.IO server only if we don't already have a connection
-    if (!globalSocket) {
-      const socketUrl = serverUrl();
-      globalSocket = io(socketUrl, {
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        timeout: 20000,
-        withCredentials: true
-      });
-
-      // Make the socket available globally for other components
-      window.socket = globalSocket;
-
-      // Set up the beforeunload event to disconnect the socket when the page is closed
-      window.addEventListener('beforeunload', () => {
-        if (globalSocket) {
-          globalSocket.disconnect();
-          globalSocket = null;
-          window.socket = null;
-        }
-      });
-    }
-
-    // Store the global socket in the ref
-    socketRef.current = globalSocket;
-
-    // Set up connection event handler
-    const handleConnect = () => {
-      graphStore.setStatusMessage("Connected to game server");
-
-      // Join the crash game room - only if we haven't processed initial data yet
-      if (!initialDataProcessedRef.current) {
-        socketRef.current.emit('join', {}, (response) => {
-          if (response.code === 0) {
-            const { data } = response;
-
-            // Update game state based on initial data
-            setGameState({
-              status: mapStatusToString(data.status),
-              multiplier: data.status === GameStatus.PROGRESS ? 1 : (data.maxRate / 100),
-              crashPoint: data.maxRate / 100,
-              timeLeft: data.prepareTime / 1000,
-              gameId: data?.gameId
-            });
-
-            // Update graph store
-            graphStore.setGameData(data);
-
-            // Update bets
-            setBets(data.players.map(player => ({
-              userId: player.userId,
-              username: player.name,
-              amount: player.bet,
-              autoCashout: player.autoEscapeRate,
-              status: player.rate > 0 ? 'cashed_out' : 'active',
-              cashoutMultiplier: player.rate
-            })));
-
-            // Check if user has an active bet
-            if (user) {
-              const userActiveBet = data.players.find(p => p.userId === user.id);
-              if (userActiveBet) {
-                setUserBet({
-                  amount: userActiveBet.bet,
-                  autoCashout: userActiveBet.autoEscapeRate
-                });
-              }
-            }
-
-            // Mark that we've processed initial data
-            initialDataProcessedRef.current = true;
-          } else {
-            graphStore.setErrorMessage("Failed to join game");
-          }
-        });
-      }
-    };
-
-    // If socket is already connected, call the handler directly
-    if (socketRef.current.connected) {
-      handleConnect();
-    } else {
-      // Otherwise set up the connect event listener
-      socketRef.current.on('connect', handleConnect);
-    }
-
-    // Authenticate socket when user is available and socket matches
-    if (user && socketRef.current) {
-      socketRef.current.emit('auth', user._id || user.id);
-    }
-
-    // Set up all the event listeners
-    socketRef.current.on('pr', (data) => {
-      // Make sure we're setting the correct startTime
-      // The startTime should be the absolute timestamp when the game will start
-      const startTime = data.startTime;
-      setGameState(prev => ({
-        ...prev,
-        gameId: data.gameId,
-        status: 'starting',
-        timeLeft: data.prepareTime / 1000,
-        multiplier: 1,
-        startTime: startTime
-      }));
-
-      // Make sure we're updating the graph store with the correct startTime
-      graphStore.updateGameStatus(GameStatus.STARTING);
-      graphStore.setStartTime(startTime);
-      graphStore.setGameStateMessage(`Starting in ${Math.ceil(data.prepareTime / 1000)}s`);
-      graphStore.resetEscapes();
-
-      // Reset bets for new game
-      setBets([]);
-      setUserBet(null);
-    });
-
-    socketRef.current.on('bg', (data) => {
-      setGameState(prev => ({
-        ...prev,
-        status: 'running',
-        multiplier: 1,
-        timeLeft: 0
-      }));
-
-      graphStore.updateGameStatus(GameStatus.PROGRESS);
-      graphStore.setStartTime(Date.now());
-      graphStore.clearMessages();
-    });
-
-    socketRef.current.on('pg', (data) => {
-      const multiplier = Math.exp(0.00006 * data.elapsed);
-      setGameState(prev => ({
-        ...prev,
-        status: 'running',
-        multiplier
-      }));
-
-      graphStore.updateGameRate(multiplier);
-    });
-
-    socketRef.current.on('ed', (data) => {
-      const crashPoint = data.maxRate / 100;
-
-      setGameState(prev => ({
-        ...prev,
-        status: 'crashed',
-        multiplier: crashPoint,
-        crashPoint,
-        hash: data.hash
-      }));
-
-      graphStore.updateGameStatus(GameStatus.ENDED);
-      graphStore.updateGameRate(crashPoint);
-      graphStore.game.hash = data.hash;
-      graphStore.game.maxRate = crashPoint;
-      graphStore.setGameStateMessage(`CRASHED AT ${crashPoint.toFixed(2)}x`);
-
-      // Fetch crash history - using a separate function to avoid setState in useEffect issue
-      fetchCrashHistory(setHistory);
-    });
-
-    socketRef.current.on('b', (bet) => {
-      setBets(prev => {
-        // Check if this bet already exists
-        const betExists = prev.some(existingBet =>
-          existingBet.userId === bet.userId &&
-          existingBet.amount === bet.bet
-        );
-
-        // Only add if it doesn't exist
-        if (!betExists) {
-          return [
-            ...prev,
-            {
-              userId: bet.userId,
-              username: bet.name,
-              amount: bet.bet,
-              autoCashout: bet.autoEscapeRate,
-              status: 'active'
-            }
-          ];
-        }
-
-        return prev;
-      });
-    });
-
-    socketRef.current.on('xb', (bet) => {
-      console.log("New x-bet:", bet);
-      // X-bets are handled differently, but we could add them to a separate state if needed
-    });
-
-    socketRef.current.on('e', (escape) => {
-      // Update bets list
-      setBets(prev => prev.map(bet =>
-        bet.userId === escape.userId
-          ? { ...bet, status: 'cashed_out', cashoutMultiplier: escape.rate }
-          : bet
-      ));
-
-      // Add escape to graph
-      const escapeData = {
-        userId: escape.userId,
-        name: escape.userId, // Will be updated with actual name if found
-        rate: escape.rate,
-        usd: 0 // Will be updated if bet is found
-      };
-
-      // Find the bet to get more details - using a separate function to avoid setState in useEffect issue
-      fetchPlayerDetails(socketRef.current, escape.userId, escapeData);
-
-      // Check if this is the current user
-      if (user && escape.userId === user.id) {
-        setUserBet(null);
-      }
-    });
-
-    socketRef.current.on('st', (data) => {
-      // console.log("Game stats:", data);
-      // This event provides a summary of the game, including all escapes
-    });
-
-    socketRef.current.on('mybet', (data) => {
-      // console.log("My bet results:", data);
-      // This event provides results for the user's bets
-    });
-
-    socketRef.current.on('connect_error', (error) => {
-      graphStore.setErrorMessage("Connection error", true);
-    });
-
-    socketRef.current.on('disconnect', () => {
-      setGameState(prev => ({ ...prev, status: 'waiting' })); // Or explicitly map to status 0 if needed
-      graphStore.updateGameStatus(0); // 0 is CONNECTION
-      graphStore.setErrorMessage("Disconnected from server", true);
-    });
-
-    return () => {
-      // When component unmounts, remove event listeners but DON'T disconnect
-      if (socketRef.current) {
-        socketRef.current.off('connect', handleConnect);
-        socketRef.current.off('pr');
-        socketRef.current.off('bg');
-        socketRef.current.off('pg');
-        socketRef.current.off('ed');
-        socketRef.current.off('b');
-        socketRef.current.off('xb');
-        socketRef.current.off('e');
-        socketRef.current.off('st');
-        socketRef.current.off('mybet');
-        socketRef.current.off('connect_error');
-        socketRef.current.off('disconnect');
-      }
-    };
-  }, [user, setGameState, setBets, setHistory, setUserBet]);
+    if (userBet.betId) settledSeenRef.current.add(userBet.betId);
+    syncBalance();
+    setUserBet(null);
+    refetchRef.current();
+  }, [user, userBet, gameState?.status, syncBalance, setUserBet]);
 
   return {
     socketRef,
     handlePlaceBet,
     handleCashout
   };
-}
-
-// Separate function to fetch crash history to avoid setState in useEffect issue
-function fetchCrashHistory(setHistory) {
-  const apiBaseUrl = serverUrl();
-  fetch(`${apiBaseUrl}/api/crash/history`)
-    .then(res => {
-      if (!res.ok) {
-        throw new Error(`HTTP error! Status: ${res.status}`);
-      }
-      return res.json();
-    })
-    .then(data => {
-      if (data.recent) {
-        setHistory(data.recent.map(game => ({
-          id: game.gameId,
-          crashPoint: game.crashedAt
-        })));
-      }
-    })
-    .catch(err => {
-      console.error("Failed to fetch crash history:", err);
-      graphStore.setErrorMessage("Failed to load game history");
-    });
-}
-
-// Separate function to fetch player details to avoid setState in useEffect issue
-function fetchPlayerDetails(socket, userId, escapeData) {
-  socket.emit('join', {}, (response) => {
-    if (response.code === 0) {
-      const player = response.data.players.find(p => p.userId === userId);
-      if (player) {
-        escapeData.name = player.name;
-        escapeData.usd = player.bet;
-        graphStore.addEscape(escapeData);
-      }
-    }
-  });
 }
