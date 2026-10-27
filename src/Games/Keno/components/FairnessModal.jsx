@@ -1,7 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { rpc } from '../../../lib/realtime';
 
 const FairnessModal = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState('overview');
+  const [seedInfo, setSeedInfo] = useState(null);
+  const [newClientSeed, setNewClientSeed] = useState('');
+  const [seedError, setSeedError] = useState(null);
+
+  const loadSeedInfo = useCallback(async () => {
+    const res = await rpc('game_seed_info', { p_game: 'keno' });
+    if (res.code === 0) {
+      setSeedInfo(Array.isArray(res.data) ? res.data[0] : res.data);
+      setSeedError(null);
+    } else {
+      setSeedError(res.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) loadSeedInfo();
+  }, [isOpen, loadSeedInfo]);
+
+  // Rotate the seed pair (reveals the retiring server seed), then refresh.
+  const handleChangeSeed = async () => {
+    const res = await rpc('rotate_seed', { p_game: 'keno', p_new_client_seed: newClientSeed || null });
+    if (res.code === 0) {
+      setNewClientSeed('');
+      await loadSeedInfo();
+    } else {
+      setSeedError(res.message);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -41,7 +70,7 @@ const FairnessModal = ({ isOpen, onClose }) => {
           <label className="text-white font-semibold block mb-1">Active Client Seed</label>
           <input
             type="text"
-            value="db3b75fba7ec7489"
+            value={seedInfo?.client_seed ?? ''}
             readOnly
             className="w-full bg-[#111827] border border-[#374151] rounded-md px-3 py-2 text-white text-sm"
           />
@@ -51,7 +80,7 @@ const FairnessModal = ({ isOpen, onClose }) => {
           <label className="text-white font-semibold block mb-1">Active Server Seed (Hashed)</label>
           <input
             type="text"
-            value="8cd4903a0a072e8f705968bffb6efadb557cfb710a97390f0068b"
+            value={seedInfo?.server_seed_hash ?? ''}
             readOnly
             className="w-full bg-[#111827] border border-[#374151] rounded-md px-3 py-2 text-white text-sm"
           />
@@ -61,7 +90,7 @@ const FairnessModal = ({ isOpen, onClose }) => {
           <label className="text-white font-semibold block mb-1">Total bets made with pair</label>
           <input
             type="text"
-            value="1"
+            value={seedInfo?.nonce ?? ''}
             readOnly
             className="w-full bg-[#111827] border border-[#374151] rounded-md px-3 py-2 text-white text-sm"
           />
@@ -74,20 +103,22 @@ const FairnessModal = ({ isOpen, onClose }) => {
         <div className="flex gap-2 items-center">
           <input
             type="text"
-            value="CKqCWYJ8N8"
+            value={newClientSeed}
+            onChange={(e) => setNewClientSeed(e.target.value)}
             className="flex-1 bg-[#111827] border border-[#374151] rounded-md px-3 py-2 text-white text-sm"
-            readOnly={false}
           />
-          <button className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-md text-sm font-medium">
+          <button onClick={handleChangeSeed} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-md text-sm font-medium">
             Change
           </button>
         </div>
 
+        {seedError && <div className="text-red-400 mt-2">{seedError}</div>}
+
         <div className="mt-3">
-          <label className="text-white font-semibold block mb-1">Next Server Seed (Hashed)</label>
+          <label className="text-white font-semibold block mb-1">Previous Server Seed (Revealed)</label>
           <input
             type="text"
-            value="0c17203a748a3cd98a6a08f349f895d9e09b3788eed0c98bf454"
+            value={seedInfo?.previous_server_seed ?? ''}
             readOnly
             className="w-full bg-[#111827] border border-[#374151] rounded-md px-3 py-2 text-white text-sm"
           />

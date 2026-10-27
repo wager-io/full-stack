@@ -19,11 +19,10 @@ import '../Keno.css';
  * plus the nonce and server-seed hash so the round can be verified afterwards.
  */
 
-// Only 'classic' is priced in keno_paytable. The other three risk levels are
-// in the schema but have no rows, and a bet against an empty paytable pays
-// zero on every outcome — so the selector is limited rather than left to look
-// like it works. Adding them is a data change, not a code one.
-const SUPPORTED_RISKS = ['Classic'];
+// All four risk levels are priced in keno_paytable, and keno_play refuses a
+// risk that has no rows for the picks made (risk_not_priced), so none of them
+// can take a stake and pay nothing.
+const SUPPORTED_RISKS = ['Classic', 'Low', 'Medium', 'High'];
 
 const KenoLayout = () => {
   const [selectedNumbers, setSelectedNumbers] = useState([]);
@@ -99,6 +98,8 @@ const KenoLayout = () => {
           insufficient_balance: 'Not enough balance for that bet.',
           invalid_amount_precision: 'Bet cannot be smaller than one cent.',
           invalid_amount: 'Enter a valid bet amount.',
+          risk_not_priced: 'That risk level is not available for this many picks.',
+          invalid_risk: 'Choose a valid risk level.',
           invalid_pick_count: 'Pick between 1 and 10 numbers.',
           duplicate_picks: 'The same number was picked twice.',
           pick_out_of_range: 'Numbers must be between 1 and 40.',
