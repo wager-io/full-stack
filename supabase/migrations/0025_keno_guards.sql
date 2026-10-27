@@ -1,5 +1,5 @@
 -- =============================================================================
--- 0025_keno_guards.sql — price the three unpriced Keno risks, and close the
+-- 0025_keno_guards.sql â€” price the three unpriced Keno risks, and close the
 -- holes in keno_play that let a bet take the stake and pay nothing.
 --
 -- 0021 let keno_play accept 'low', 'medium' and 'high' although keno_paytable
