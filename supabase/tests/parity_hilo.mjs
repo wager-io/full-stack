@@ -311,8 +311,8 @@ const report = (what, i, expected, actual) => {
         } else if (choice !== 'skip') {
           const { hi_profit, lo_profit } = calculateProfit({ bet_amount: STAKE + profit, hi_chance, lo_chance })
           const gain = choice === 'hi' ? hi_profit : lo_profit
-          payout = 1 + (profit + gain) / STAKE
           profit = Math.min(5000, profit + gain)
+          payout = 1 + profit / STAKE
         }
         card = next
       }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import api from '../../lib/apiCompat';
+import { rpc } from '../../lib/realtime';
 import { toast } from 'sonner';
 import { FaInfoCircle, FaExclamationTriangle } from 'react-icons/fa';
 import { useAuth } from '../../context/AuthContext';
@@ -21,6 +21,25 @@ import { useNavigate } from 'react-router-dom';
 // address fails under the field rather than after a round trip — the server
 // remains the authority.
 const TRON_ADDRESS = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
+
+// Postgres raises bare codes; turn the ones a player can hit into readable text.
+const WITHDRAWAL_ERRORS = {
+  insufficient_balance: 'You do not have enough balance for this withdrawal.',
+  withdrawal_already_pending: 'You already have a withdrawal in progress.',
+  withdrawals_disabled: 'Withdrawals are disabled on your account. Contact support.',
+  account_not_active: 'Your account is not active.',
+  invalid_amount_precision: 'Amount cannot have more than two decimal places.',
+  invalid_amount: 'Enter a valid amount.',
+  missing_address: 'Enter a withdrawal address.',
+  withdrawals_tron_address_shape: 'That does not look like a TRON (TRC-20) address.',
+  not_authenticated: 'Please sign in again.',
+  unknown_user: 'Account not found. Please sign in again.',
+};
+
+function withdrawalMessage(raw = '') {
+  const key = Object.keys(WITHDRAWAL_ERRORS).find((k) => String(raw).includes(k));
+  return key ? WITHDRAWAL_ERRORS[key] : (raw || 'Could not create the withdrawal request');
+}
 
 export default function WithdrawTab() {
   const { balance } = useAuth();
@@ -45,22 +64,32 @@ export default function WithdrawTab() {
     if (!canSubmit) return;
     try {
       setSubmitting(true);
-      const res = await api.post('/api/ccpayment/withdraw', {
-        amount: usd,          // USD; USDT 1:1
-        address: trimmed,
+      // request_withdrawal(p_amount numeric, p_address text, p_chain text,
+      //   p_currency text, p_memo text, p_coin_id int, p_coin_amount numeric)
+      // The user comes from auth.uid(); no coin amount is sent (USD, USDT 1:1).
+      const res = await rpc('request_withdrawal', {
+        p_amount: usd,
+        p_address: trimmed,
+        p_chain: 'TRC20',
+        p_currency: 'USDT',
+        p_memo: null,
+        p_coin_id: null,
+        p_coin_amount: null,
       });
 
-      if (res.data.success) {
-        toast.success('Withdrawal requested — it is now awaiting review');
+      if (res.code === 0 && res.data?.ok) {
+        // State is REQUESTED: nothing has moved, an administrator must approve.
+        // The balance is left alone; AuthContext's profiles subscription owns it.
+        toast.success('Withdrawal requested — it is pending review and needs admin approval');
         setAddress('');
         setAmount('');
         navigate('/transactions/withdraw');
       } else {
-        toast.error(res.data.message || 'Could not create the withdrawal request');
+        toast.error(withdrawalMessage(res.message));
       }
     } catch (err) {
       console.error('Error creating withdrawal request:', err);
-      toast.error(err.response?.data?.message || 'Could not create the withdrawal request');
+      toast.error('Could not create the withdrawal request');
     } finally {
       setSubmitting(false);
     }
