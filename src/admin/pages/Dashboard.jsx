@@ -1,4 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
+import { supabase } from '../../lib/supabase';
+import { rpc } from '../../lib/realtime';
 import {
   People as Users,
   TrendingUp,
@@ -19,54 +22,85 @@ import TopGameWinners from '../components/dashboard/TopGameWinners';
 import AdditionalMetrics from '../components/dashboard/AdditionalMetrics';
 
 export default function Dashboard() {
-  // Sample data - in real app this would come from API
+  // Every figure here used to be a literal. They looked plausible, which is
+  // what made them dangerous: an operator reading "732 users" had no way to
+  // tell it was decoration.
+  //
+  // admin_dashboard_stats (0022) computes them together from one snapshot.
+  // Five separate client queries would be five points in time, and a
+  // dashboard whose halves disagree is worse than one that is merely slow.
+  const [stats, setStats] = useState(null);
+  const [topUsers, setTopUsers] = useState([]);
+  const [recentTransactions, setRecentTransactions] = useState([]);
+  const [topGameWinners, setTopGameWinners] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [s, activity, players, winners] = await Promise.all([
+      rpc('admin_dashboard_stats'),
+      rpc('admin_recent_activity', { p_limit: 8 }),
+      supabase.from('profiles')
+        .select('id, username, country, balance')
+        .order('balance', { ascending: false }).limit(15),
+      supabase.from('bets')
+        .select('bet_id, game, bet_amount, payout, display_name')
+        .eq('state', 'won').order('payout', { ascending: false }).limit(8),
+    ]);
+
+    if (s.code !== 0) toast.error(`Could not load stats: ${s.message}`);
+    else setStats(s.data);
+
+    if (activity.code === 0) {
+      setRecentTransactions((activity.data ?? []).map((a) => ({
+        userId: a.user_id,
+        username: a.username ?? '—',
+        type: a.kind === 'deposit' ? 'Deposit' : 'Withdraw',
+        amount: Number(a.amount ?? 0),
+        date: new Date(a.created_at).toLocaleDateString(),
+        status: a.status,
+      })));
+    }
+
+    if (!players.error) {
+      setTopUsers((players.data ?? []).map((u) => ({
+        id: u.id,
+        username: u.username ?? '—',
+        country: u.country ?? '—',
+        balance: Number(u.balance ?? 0),
+        // No flag emoji. `country` is free text on profiles, so mapping it to
+        // a flag would be a guess rendered as a fact.
+        flag: '',
+      })));
+    }
+
+    if (!winners.error) {
+      setTopGameWinners((winners.data ?? []).map((b) => ({
+        gameId: b.bet_id,
+        gameName: b.game,
+        // Null when the player opted out of public listings — the privacy rule
+        // is enforced at write time, so there is genuinely no name to show.
+        playerName: b.display_name ?? 'Hidden',
+        betAmount: Number(b.bet_amount ?? 0),
+        payout: Number(b.payout ?? 0),
+      })));
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
   const statsData = {
-    totalUsers: 732,
-    monthlyDeposit: 12000,
-    monthlyWithdraw: 110000,
-    totalGGR: 5700,
-    totalLoss: 1800
+    totalUsers: stats?.players_total ?? 0,
+    monthlyDeposit: Number(stats?.deposits_total ?? 0),
+    monthlyWithdraw: Number(stats?.withdrawals_paid ?? 0),
+    totalGGR: Number(stats?.gross_gaming_revenue ?? 0),
+    totalLoss: Number(stats?.paid_out_total ?? 0),
   };
 
-  const topUsers = [
-    { id: 'U001', username: 'CryptoKing', country: 'US', balance: 1200, flag: '🇺🇸' },
-    { id: 'U002', username: 'LuckyPlayer', country: 'UK', balance: 654, flag: '🇬🇧' },
-    { id: 'U003', username: 'BetMaster', country: 'CA', balance: 500, flag: '🇨🇦' },
-    { id: 'U004', username: 'WinnerX', country: 'AU', balance: 28750, flag: '🇦🇺' },
-    { id: 'U005', username: 'GamerPro', country: 'DE', balance: 25600, flag: '🇩🇪' },
-    { id: 'U006', username: 'SlotMaster', country: 'FR', balance: 23400, flag: '🇫🇷' },
-    { id: 'U007', username: 'PokerAce', country: 'JP', balance: 21800, flag: '🇯🇵' },
-    { id: 'U008', username: 'RoulettePro', country: 'IT', balance: 19500, flag: '🇮🇹' },
-    { id: 'U009', username: 'BlackjackKing', country: 'ES', balance: 18200, flag: '🇪🇸' },
-    { id: 'U010', username: 'CasinoLegend', country: 'BR', balance: 16900, flag: '🇧🇷' },
-    { id: 'U011', username: 'HighRoller', country: 'NL', balance: 15600, flag: '🇳🇱' },
-    { id: 'U012', username: 'VegasViper', country: 'SE', balance: 14300, flag: '🇸🇪' },
-    { id: 'U013', username: 'MonacoMagic', country: 'CH', balance: 13000, flag: '🇨🇭' },
-    { id: 'U014', username: 'AtlanticAce', country: 'NO', balance: 11700, flag: '🇳🇴' },
-    { id: 'U015', username: 'GoldenGambler', country: 'DK', balance: 10400, flag: '🇩🇰' },
-  ];
 
-  const recentTransactions = [
-    { userId: 'U001', username: 'CryptoKing', type: 'Deposit', amount: 5000, date: '2024-01-15', status: 'Completed' },
-    { userId: 'U002', username: 'LuckyPlayer', type: 'Withdraw', amount: 2500, date: '2024-01-15', status: 'Pending' },
-    { userId: 'U003', username: 'BetMaster', type: 'Deposit', amount: 8000, date: '2024-01-14', status: 'Completed' },
-    { userId: 'U004', username: 'WinnerX', type: 'Withdraw', amount: 3200, date: '2024-01-14', status: 'Completed' },
-    { userId: 'U005', username: 'GamerPro', type: 'Deposit', amount: 1500, date: '2024-01-13', status: 'Completed' },
-    { userId: 'U006', username: 'SlotMaster', type: 'Withdraw', amount: 4500, date: '2024-01-13', status: 'Processing' },
-    { userId: 'U007', username: 'PokerAce', type: 'Deposit', amount: 2800, date: '2024-01-12', status: 'Completed' },
-    { userId: 'U008', username: 'RoulettePro', type: 'Withdraw', amount: 1800, date: '2024-01-12', status: 'Completed' },
-  ];
 
-  const topGameWinners = [
-    { gameId: 'G001', gameName: 'Mega Fortune Slots', playerName: 'CryptoKing', betAmount: 500, payout: 25000 },
-    { gameId: 'G002', gameName: 'Blackjack VIP', playerName: 'LuckyPlayer', betAmount: 1000, payout: 15000 },
-    { gameId: 'G003', gameName: 'European Roulette', playerName: 'WinnerX', betAmount: 750, payout: 12500 },
-    { gameId: 'G004', gameName: 'Lightning Baccarat', playerName: 'BetMaster', betAmount: 300, payout: 8400 },
-    { gameId: 'G005', gameName: 'Starburst Slots', playerName: 'GamerPro', betAmount: 200, payout: 7200 },
-    { gameId: 'G006', gameName: 'Live Dream Catcher', playerName: 'SlotMaster', betAmount: 400, payout: 6800 },
-    { gameId: 'G007', gameName: 'Book of Dead', playerName: 'PokerAce', betAmount: 150, payout: 5500 },
-    { gameId: 'G008', gameName: 'Crazy Time', playerName: 'RoulettePro', betAmount: 250, payout: 4750 },
-  ];
 
   return (
     <div className="min-h-screen p-6" style={{ background: 'var(--primary-bg)' }}>
@@ -81,6 +115,12 @@ export default function Dashboard() {
         >
           Dashboard
         </h1>
+        {/* Said out loud, because every number on this page starts at zero
+            while the queries are in flight — and a dashboard briefly showing
+            "0 users" reads as a catastrophe rather than as a spinner. */}
+        <p className="text-sm" style={{ color: 'var(--text-dark)' }}>
+          {loading ? 'Loading live figures…' : 'Live figures from the database'}
+        </p>
       </div>
 
       {/* 3D Metric Cards */}
@@ -89,33 +129,25 @@ export default function Dashboard() {
           title="Number of Users"
           value={statsData.totalUsers.toLocaleString()}
           icon={<Users />}
-          trend="+12.5%"
-          trendUp={true}
-          description="Total registered users"
+          description={`${stats?.players_active ?? 0} active`}
         />
         <MetricCard
           title="Total Deposit"
           value={`$${statsData.monthlyDeposit.toLocaleString()}`}
           icon={<TrendingUp />}
-          trend="+18.3%"
-          trendUp={true}
-          description="Monthly deposit volume"
+          description={`${stats?.deposits_count ?? 0} credited deposit(s)`}
         />
         <MetricCard
           title="Total GGR"
           value={`$${statsData.totalGGR.toLocaleString()}`}
           icon={<MonetizationOn />}
-          trend="+22.1%"
-          trendUp={true}
-          description="Gross Gaming Revenue"
+          description={`${stats?.bets_total ?? 0} settled bets`}
         />
         <MetricCard
-          title="Total Loss"
+          title="Paid Out"
           value={`$${statsData.totalLoss.toLocaleString()}`}
           icon={<AccountBalance />}
-          trend="+8.7%"
-          trendUp={true}
-          description="Player total losses"
+          description={`${stats?.withdrawals_pending ?? 0} withdrawal(s) awaiting action`}
         />
       </div>
 

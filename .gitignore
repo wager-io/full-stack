@@ -26,3 +26,4 @@ dist-ssr
 *.sw?
 supabase/.temp/
 deno.lock
+dev.log
